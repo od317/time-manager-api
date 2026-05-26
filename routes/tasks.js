@@ -11,6 +11,16 @@ router.post("/", async (req, res) => {
     const { title, description, goalId, priority, estimatedMinutes, dueDate } =
       req.body;
 
+    // Get parent goal's color
+    let taskColor = null;
+    if (goalId) {
+      const goal = await prisma.goal.findUnique({
+        where: { id: goalId },
+        select: { color: true },
+      });
+      taskColor = goal?.color || null;
+    }
+
     const task = await prisma.task.create({
       data: {
         userId: req.user.id,
@@ -18,6 +28,7 @@ router.post("/", async (req, res) => {
         title,
         description,
         priority: priority || "MEDIUM",
+        color: taskColor,
         estimatedMinutes,
         dueDate: dueDate ? new Date(dueDate) : null,
       },

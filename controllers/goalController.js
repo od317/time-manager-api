@@ -126,6 +126,7 @@ const createGoal = async (req, res) => {
       category,
       tags,
       priority,
+      goalType,
       targetMetric,
       targetValue,
       unit,
@@ -138,14 +139,14 @@ const createGoal = async (req, res) => {
       recurringRule,
     } = req.body;
 
-    // If parentId provided, verify parent exists and belongs to user
-    if (parentId) {
+    // If creating a sub-goal, inherit parent's color
+    let goalColor = color;
+    if (parentId && !color) {
       const parentGoal = await prisma.goal.findFirst({
         where: { id: parentId, userId: req.user.id },
+        select: { color: true },
       });
-      if (!parentGoal) {
-        return res.status(404).json({ message: "Parent goal not found" });
-      }
+      goalColor = parentGoal?.color || null;
     }
 
     const goal = await prisma.goal.create({
@@ -157,13 +158,14 @@ const createGoal = async (req, res) => {
         category,
         tags: tags || [],
         priority: priority || "MEDIUM",
+        goalType: goalType || "quantity",
         targetMetric,
         targetValue,
         unit,
         startDate: startDate ? new Date(startDate) : new Date(),
         endDate: endDate ? new Date(endDate) : null,
         deadlineType: deadlineType || "HARD",
-        color,
+        color: goalColor,
         icon,
         isRecurring: isRecurring || false,
         recurringRule,

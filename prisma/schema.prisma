@@ -121,6 +121,8 @@ model Task {
   id              String      @id @default(uuid())
   userId          String
   goalId          String?
+
+  color           String?
   
   user            User        @relation(fields: [userId], references: [id])
   goal            Goal?       @relation(fields: [goalId], references: [id])
