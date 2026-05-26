@@ -9,6 +9,7 @@ const authRoutes = require("./routes/auth");
 const goalRoutes = require("./routes/goals");
 const habitRoutes = require("./routes/habits");
 const timeEntryRoutes = require("./routes/timeEntries");
+const taskRoutes = require("./routes/tasks");
 
 // Import middleware
 const errorHandler = require("./middleware/errorHandler");
@@ -33,6 +34,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/goals", goalRoutes);
 app.use("/api/habits", habitRoutes);
 app.use("/api/time-entries", timeEntryRoutes);
+app.use("/api/tasks", taskRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {

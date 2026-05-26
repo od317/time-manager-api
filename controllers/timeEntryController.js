@@ -1,5 +1,23 @@
 const prisma = require("../utils/prisma");
 
+async function getParentGoalIds(goalId) {
+  const parentIds = [];
+  let currentGoal = await prisma.goal.findUnique({
+    where: { id: goalId },
+    select: { parentId: true },
+  });
+
+  while (currentGoal && currentGoal.parentId) {
+    parentIds.push(currentGoal.parentId);
+    currentGoal = await prisma.goal.findUnique({
+      where: { id: currentGoal.parentId },
+      select: { parentId: true },
+    });
+  }
+
+  return parentIds;
+}
+
 // @desc    Get all time entries for user
 // @route   GET /api/time-entries
 const getTimeEntries = async (req, res) => {
@@ -77,7 +95,6 @@ const startTimer = async (req, res) => {
   try {
     const { goalId, taskId, habitId, note } = req.body;
 
-    // Check if there's already a running timer
     const runningTimer = await prisma.timeEntry.findFirst({
       where: {
         userId: req.user.id,
@@ -120,16 +137,23 @@ const stopTimer = async (req, res) => {
       where: {
         id: req.params.id,
         userId: req.user.id,
-        status: "RUNNING",
+        status: { in: ["RUNNING", "PAUSED"] },
       },
     });
 
     if (!timeEntry) {
-      return res.status(404).json({ message: "No running timer found" });
+      return res
+        .status(404)
+        .json({ message: "No active or paused timer found" });
     }
 
     const endTime = new Date();
-    const duration = Math.floor((endTime - timeEntry.startTime) / 1000); // in seconds
+
+    // If paused, use the already-calculated duration; if running, calculate now
+    const duration =
+      timeEntry.status === "PAUSED"
+        ? timeEntry.duration || 0
+        : Math.floor((endTime - timeEntry.startTime) / 1000);
 
     const updatedEntry = await prisma.timeEntry.update({
       where: { id: req.params.id },
@@ -216,7 +240,7 @@ const quickLog = async (req, res) => {
     const { goalId, taskId, habitId, duration, startTime, note } = req.body;
 
     const start = startTime ? new Date(startTime) : new Date();
-    const durationInSeconds = duration * 60; // Convert minutes to seconds
+    const durationInSeconds = duration * 60;
     const end = new Date(start.getTime() + durationInSeconds * 1000);
 
     const timeEntry = await prisma.timeEntry.create({
@@ -359,6 +383,38 @@ const getTimeSummary = async (req, res) => {
   }
 };
 
+const updateTimeEntry = async (req, res) => {
+  try {
+    const timeEntry = await prisma.timeEntry.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+    });
+
+    if (!timeEntry) {
+      return res.status(404).json({ message: "Time entry not found" });
+    }
+
+    // Build update data - only include fields that are provided
+    const updateData = {};
+
+    if (req.body.goalId !== undefined) {
+      updateData.goalId = req.body.goalId || null;
+    }
+    if (req.body.taskId !== undefined) {
+      updateData.taskId = req.body.taskId || null;
+    }
+
+    const updated = await prisma.timeEntry.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   getTimeEntries,
   getTimeEntry,
@@ -370,4 +426,5 @@ module.exports = {
   deleteTimeEntry,
   getRunningTimer,
   getTimeSummary,
+  updateTimeEntry,
 };

@@ -4,11 +4,11 @@ const prisma = require("../utils/prisma");
 // @route   GET /api/goals
 const getGoals = async (req, res) => {
   try {
-    const { status, parentId } = req.query;
+    const { status } = req.query;
 
     const where = {
       userId: req.user.id,
-      parentId: parentId || null, // Get top-level goals by default
+      // Remove the parentId filter - return ALL goals
     };
 
     if (status) {
@@ -21,6 +21,7 @@ const getGoals = async (req, res) => {
         children: {
           include: {
             tasks: true,
+            children: true,
           },
         },
         tasks: true,
@@ -68,6 +69,43 @@ const getGoal = async (req, res) => {
 
     if (!goal) {
       return res.status(404).json({ message: "Goal not found" });
+    }
+
+    // Collect all sub-goal IDs recursively
+    function getAllChildIds(g, ids = []) {
+      if (g.children) {
+        for (const child of g.children) {
+          ids.push(child.id);
+          getAllChildIds(child, ids);
+        }
+      }
+      return ids;
+    }
+
+    const allChildIds = getAllChildIds(goal);
+
+    // Fetch time entries for all sub-goals
+    if (allChildIds.length > 0) {
+      const childTimeEntries = await prisma.timeEntry.findMany({
+        where: {
+          goalId: { in: allChildIds },
+          status: "COMPLETED",
+        },
+        orderBy: { startTime: "desc" },
+      });
+
+      // Add child time entries to the response
+      goal.allTimeEntries = [...(goal.timeEntries || []), ...childTimeEntries];
+      goal.totalTimeSpent = goal.allTimeEntries.reduce(
+        (sum, e) => sum + (e.duration || 0),
+        0,
+      );
+    } else {
+      goal.allTimeEntries = goal.timeEntries || [];
+      goal.totalTimeSpent = goal.allTimeEntries.reduce(
+        (sum, e) => sum + (e.duration || 0),
+        0,
+      );
     }
 
     res.json(goal);

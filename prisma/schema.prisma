@@ -63,6 +63,8 @@ model Goal {
   userId          String
   user            User        @relation(fields: [userId], references: [id])
   
+  goalType        String      @default("quantity")
+
   parentId        String?
   parent          Goal?       @relation("GoalHierarchy", fields: [parentId], references: [id])
   children        Goal[]      @relation("GoalHierarchy")
