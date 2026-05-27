@@ -5,6 +5,40 @@ const auth = require("../middleware/auth");
 
 router.use(auth);
 
+router.get("/", async (req, res) => {
+  try {
+    const { status, goalId } = req.query;
+
+    const where = { userId: req.user.id };
+
+    // Only filter by status if explicitly provided
+    if (status) {
+      const statuses = Array.isArray(status) ? status : [status];
+      where.status = { in: statuses };
+    }
+    // If no status provided, where.status is not set = returns ALL statuses
+
+    if (goalId) {
+      where.goalId = goalId;
+    }
+
+    const tasks = await prisma.task.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }],
+      include: {
+        goal: {
+          select: { id: true, title: true, color: true },
+        },
+      },
+    });
+
+    res.json(tasks);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+});
+
 // Create task
 router.post("/", async (req, res) => {
   try {
