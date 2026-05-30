@@ -13,8 +13,9 @@ const generateToken = (id) => {
 // @route   POST /api/auth/register
 const register = async (req, res) => {
   try {
-    const { email, password, name } = req.body;
+    const { email, password, name, timezone } = req.body;
 
+    const userTimezone = timezone || "UTC";
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
       where: { email },
@@ -34,6 +35,7 @@ const register = async (req, res) => {
         email,
         password: hashedPassword,
         name,
+        timezone: userTimezone,
       },
       select: {
         id: true,
