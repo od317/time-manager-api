@@ -11,7 +11,7 @@ const habitRoutes = require("./routes/habits");
 const timeEntryRoutes = require("./routes/timeEntries");
 const taskRoutes = require("./routes/tasks");
 const aiRoutes = require("./routes/ai");
-
+const deadlineRoutes = require("./routes/deadline");
 // Import middleware
 const errorHandler = require("./middleware/errorHandler");
 
@@ -37,6 +37,7 @@ app.use("/api/habits", habitRoutes);
 app.use("/api/time-entries", timeEntryRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/ai", aiRoutes);
+app.use("/api/deadline", deadlineRoutes);
 
 // Health check
 app.get("/api/health", (req, res) => {
