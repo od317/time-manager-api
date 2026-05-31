@@ -6,71 +6,23 @@ const getHabits = async (req, res) => {
   try {
     const { status, frequencyType } = req.query;
 
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { timezone: true },
-    });
-    const userTimezone = user?.timezone || "UTC";
-
-    // Calculate today in user's timezone correctly
-    const now = new Date();
-    const userDateStr = now.toLocaleString("en-US", {
-      timeZone: userTimezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
-    // userDateStr is "05/29/2026" (MM/DD/YYYY)
-    const [month, day, year] = userDateStr.split("/");
-    // Create date at midnight UTC for the user's local date
-    const todayStart = new Date(
-      Date.UTC(parseInt(year), parseInt(month) - 1, parseInt(day), 0, 0, 0),
-    );
-    const todayEnd = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-
-    const where = {
-      userId: req.user.id,
-    };
-
+    const where = { userId: req.user.id };
     if (status) where.status = status;
     if (frequencyType) where.frequencyType = frequencyType;
 
     const habits = await prisma.habit.findMany({
       where,
       include: {
-        _count: {
-          select: { logs: true },
-        },
+        _count: { select: { logs: true } },
         logs: {
-          where: {
-            date: {
-              gte: todayStart,
-              lt: todayEnd,
-            },
-          },
-          take: 1,
+          orderBy: { date: "desc" },
+          take: 30, // Last 30 days for history
         },
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
 
-    // Mark habits that are due today based on frequency
-    const today = parseInt(day);
-    const dayOfWeek = new Date(todayStart).getUTCDay();
-
-    const enrichedHabits = habits.map((habit) => {
-      const isDue =
-        habit.frequencyType === "DAILY" ||
-        (habit.frequencyType === "WEEKLY" &&
-          habit.frequencyDays.includes(dayOfWeek));
-
-      return {
-        ...habit,
-        isDueToday: isDue,
-      };
-    });
-
-    res.json(enrichedHabits);
+    res.json(habits);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -263,61 +215,19 @@ const logHabit = async (req, res) => {
       return res.status(404).json({ message: "Habit not found" });
     }
 
-    // Get user's timezone
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { timezone: true },
-    });
-    const userTimezone = user?.timezone || "UTC";
-
-    // Get current date and day of week in user's timezone
-    const now = new Date();
-    const options = {
-      timeZone: userTimezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      weekday: "short",
-    };
-    const formatter = new Intl.DateTimeFormat("en-US", options);
-    const parts = formatter.formatToParts(now);
-
-    const dayPart = parts.find((p) => p.type === "weekday")?.value; // "Mon", "Tue", etc.
-    const monthPart = parts.find((p) => p.type === "month")?.value;
-    const dayNumPart = parts.find((p) => p.type === "day")?.value;
-    const yearPart = parts.find((p) => p.type === "year")?.value;
-
-    // Check if habit is due today
-    const dayMap = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
-    const today = dayMap[dayPart] ?? 0;
-
-    const isDueToday =
-      habit.frequencyType === "DAILY" ||
-      (habit.frequencyType === "WEEKLY" && habit.frequencyDays.includes(today));
-
-    if (!isDueToday) {
-      return res.status(400).json({
-        message: `This habit is not scheduled for today (${dayPart}). It runs on ${habit.frequencyType === "DAILY" ? "every day" : habit.frequencyDays.map((d) => Object.keys(dayMap)[d]).join(", ")}.`,
-      });
-    }
-
-    // Calculate today's date in user's timezone
+    // Use the date from the frontend, or default to today (server date, but frontend will interpret correctly)
     let logDate;
     if (date) {
       logDate = new Date(date);
-      logDate.setHours(0, 0, 0, 0);
     } else {
-      const dateStr = `${yearPart}-${monthPart.padStart(2, "0")}-${dayNumPart.padStart(2, "0")}`;
-      logDate = new Date(dateStr + "T00:00:00.000Z");
+      // Just use today's date - frontend will handle timezone display
+      const now = new Date();
+      logDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     }
 
-    // Check if already logged for this date
     const existingLog = await prisma.habitLog.findUnique({
       where: {
-        habitId_date: {
-          habitId,
-          date: logDate,
-        },
+        habitId_date: { habitId, date: logDate },
       },
     });
 
@@ -345,7 +255,6 @@ const logHabit = async (req, res) => {
     });
 
     await updateHabitStats(habitId);
-
     res.status(201).json(log);
   } catch (error) {
     console.error(error);
