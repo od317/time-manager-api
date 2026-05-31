@@ -111,6 +111,13 @@ Server runs on `http://localhost:5000`
 - Entry types: TIMER, MANUAL, POMODORO
 - Status: RUNNING, PAUSED, COMPLETED
 
+### AI Integration
+
+- **Endpoint**: `POST /api/ai/insights`
+- **Provider**: OpenRouter (Gemini 2.0 Flash)
+- **Fallback**: Returns pre-written insights if AI fails
+- **Free tier**: No credit card required
+
 ## 🔌 API Endpoints
 
 ### Authentication
@@ -256,3 +263,10 @@ duration  Int?      // Seconds
 2. Deploy as Web Service from GitHub
 3. Set environment variables
 4. Run migrations on first deploy
+
+### Environment Variables
+
+```env
+# AI (OpenRouter)
+OPENROUTER_API_KEY=your-openrouter-api-key
+```
