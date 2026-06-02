@@ -25,11 +25,11 @@ app.use(
 );
 
 // Helmet AFTER CORS, with cross-origin disabled
-app.use(
-  helmet({
-    crossOriginResourcePolicy: { policy: "cross-origin" },
-  }),
-);
+// app.use(
+//   helmet({
+//     crossOriginResourcePolicy: { policy: "cross-origin" },
+//   }),
+// );
 
 app.use(morgan("dev"));
 app.use(express.json());
