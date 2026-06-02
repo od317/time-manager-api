@@ -86,12 +86,30 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
+    // Prepare update data
+    const updateData = { ...req.body };
+
+    // Convert date strings to Date objects
+    if (updateData.dueDate === null || updateData.dueDate === "") {
+      updateData.dueDate = null;
+    } else if (updateData.dueDate && typeof updateData.dueDate === "string") {
+      updateData.dueDate = new Date(updateData.dueDate);
+    }
+
+    if (updateData.completedAt) {
+      updateData.completedAt = new Date(updateData.completedAt);
+    }
+
+    // Remove undefined values
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
+
     const updated = await prisma.task.update({
       where: { id: req.params.id },
-      data: {
-        ...req.body,
-        completedAt: req.body.status === "COMPLETED" ? new Date() : undefined,
-      },
+      data: updateData,
     });
 
     res.json(updated);
