@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 5000;
 // CORS FIRST - before helmet
 app.use(
   cors({
-    origin: process.env.CLIENT_URL || "https://time-manager-dun.vercel.app",
+    origin: "https://time-manager-dun.vercel.app",
     credentials: true,
   }),
 );
