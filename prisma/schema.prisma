@@ -21,6 +21,11 @@ model User {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   
+  emailVerified      Boolean   @default(false)
+  verificationToken  String?
+  resetToken         String?
+  resetTokenExpiry   DateTime?
+
   goals         Goal[]
   habits        Habit[]
   tasks         Task[]           // ← ADD THIS
