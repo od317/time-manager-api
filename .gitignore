@@ -7,8 +7,6 @@ node_modules/
 .env.production
 
 # Prisma
-prisma/migrations/
-!prisma/migrations/migration_lock.toml
 
 # Logs
 logs/
