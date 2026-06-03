@@ -45,6 +45,23 @@ router.post("/", async (req, res) => {
     const { title, description, goalId, priority, estimatedMinutes, dueDate } =
       req.body;
 
+    if (goalId) {
+      const goal = await prisma.goal.findFirst({
+        where: { id: goalId, userId: req.user.id },
+        select: { status: true, title: true },
+      });
+
+      if (!goal) {
+        return res.status(404).json({ message: "Goal not found" });
+      }
+
+      if (goal.status === "COMPLETED") {
+        return res.status(400).json({
+          message: `Cannot add tasks to completed goal "${goal.title}".`,
+        });
+      }
+    }
+    
     // Get parent goal's color
     let taskColor = null;
     if (goalId) {

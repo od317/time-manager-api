@@ -5,15 +5,8 @@ const prisma = require("../utils/prisma");
 const getGoals = async (req, res) => {
   try {
     const { status } = req.query;
-
-    const where = {
-      userId: req.user.id,
-      // Remove the parentId filter - return ALL goals
-    };
-
-    if (status) {
-      where.status = status;
-    }
+    const where = { userId: req.user.id };
+    if (status) where.status = status;
 
     const goals = await prisma.goal.findMany({
       where,
@@ -25,16 +18,55 @@ const getGoals = async (req, res) => {
           },
         },
         tasks: true,
-        _count: {
-          select: {
-            timeEntries: true,
-          },
-        },
+        timeEntries: true,
+        _count: { select: { timeEntries: true } },
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
     });
 
-    res.json(goals);
+    // Calculate combined progress for each goal
+    const enrichedGoals = goals.map((goal) => {
+      // Get all sub-goal IDs
+      const getAllIds = (g, ids = []) => {
+        if (g.children) {
+          g.children.forEach((child) => {
+            ids.push(child.id);
+            getAllIds(child, ids);
+          });
+        }
+        return ids;
+      };
+      const childIds = getAllIds(goal);
+
+      // Get time from sub-goals
+      let totalTime = (goal.timeEntries || []).reduce(
+        (sum, e) => sum + (e.duration || 0),
+        0,
+      );
+
+      if (childIds.length > 0) {
+        // Add sub-goal time (we don't have it here, so progress stays as-is)
+        // For time-based goals, calculate from currentValue
+      }
+
+      // Calculate progress including sub-goals
+      let combinedProgress = goal.progress || 0;
+      if (goal.goalType === "time" && goal.targetValue) {
+        const trackedInUnit =
+          goal.unit === "minutes" ? totalTime / 60 : totalTime / 3600;
+        combinedProgress = Math.min(
+          (trackedInUnit / goal.targetValue) * 100,
+          100,
+        );
+      }
+
+      return {
+        ...goal,
+        combinedProgress: Math.max(goal.progress, combinedProgress),
+      };
+    });
+
+    res.json(enrichedGoals);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -108,6 +140,21 @@ const getGoal = async (req, res) => {
       );
     }
 
+    if (goal.goalType === "time" && goal.targetValue) {
+      const totalSeconds = goal.totalTimeSpent || 0;
+      const trackedInUnit =
+        goal.unit === "minutes" ? totalSeconds / 60 : totalSeconds / 3600;
+      goal.combinedProgress = Math.min(
+        (trackedInUnit / goal.targetValue) * 100,
+        100,
+      );
+    } else if (goal.goalType === "quantity" && goal.targetValue) {
+      // For quantity goals, use the stored progress
+      goal.combinedProgress = goal.progress || 0;
+    } else {
+      goal.combinedProgress = goal.progress || 0;
+    }
+
     res.json(goal);
   } catch (error) {
     console.error(error);
@@ -138,6 +185,24 @@ const createGoal = async (req, res) => {
       isRecurring,
       recurringRule,
     } = req.body;
+
+    // If creating a sub-goal, check if parent is completed
+    if (parentId) {
+      const parentGoal = await prisma.goal.findFirst({
+        where: { id: parentId, userId: req.user.id },
+        select: { status: true, title: true },
+      });
+
+      if (!parentGoal) {
+        return res.status(404).json({ message: "Parent goal not found" });
+      }
+
+      if (parentGoal.status === "COMPLETED") {
+        return res.status(400).json({
+          message: `Cannot add sub-goals to completed goal "${parentGoal.title}".`,
+        });
+      }
+    }
 
     // If creating a sub-goal, inherit parent's color
     let goalColor = color;
@@ -187,13 +252,42 @@ const createGoal = async (req, res) => {
 // @route   PUT /api/goals/:id
 const updateGoal = async (req, res) => {
   try {
-    // Verify goal exists and belongs to user
     const existingGoal = await prisma.goal.findFirst({
       where: { id: req.params.id, userId: req.user.id },
     });
 
     if (!existingGoal) {
       return res.status(404).json({ message: "Goal not found" });
+    }
+
+    // If trying to complete, check sub-goals
+    if (req.body.status === "COMPLETED") {
+      const activeSubGoals = await prisma.goal.count({
+        where: {
+          parentId: req.params.id,
+          status: { in: ["ACTIVE", "PAUSED"] },
+        },
+      });
+
+      if (activeSubGoals > 0) {
+        return res.status(400).json({
+          message: `Cannot complete this goal. ${activeSubGoals} sub-goal(s) are still active.`,
+        });
+      }
+
+      // Also check active tasks
+      const activeTasks = await prisma.task.count({
+        where: {
+          goalId: req.params.id,
+          status: { in: ["TODO", "IN_PROGRESS"] },
+        },
+      });
+
+      if (activeTasks > 0) {
+        return res.status(400).json({
+          message: `Cannot complete this goal. ${activeTasks} task(s) are still pending.`,
+        });
+      }
     }
 
     const {
