@@ -83,6 +83,9 @@ const getGoal = async (req, res) => {
         userId: req.user.id,
       },
       include: {
+        parent: {
+          select: { id: true, status: true, title: true },
+        },
         children: {
           include: {
             tasks: true,
@@ -258,6 +261,19 @@ const updateGoal = async (req, res) => {
 
     if (!existingGoal) {
       return res.status(404).json({ message: "Goal not found" });
+    }
+
+    if (req.body.status === "ACTIVE" && existingGoal.parentId) {
+      const parentGoal = await prisma.goal.findFirst({
+        where: { id: existingGoal.parentId, userId: req.user.id },
+        select: { status: true, title: true },
+      });
+
+      if (parentGoal && parentGoal.status === "COMPLETED") {
+        return res.status(400).json({
+          message: `Cannot re-activate this sub-goal. The parent goal "${parentGoal.title}" is completed.`,
+        });
+      }
     }
 
     // If trying to complete, check sub-goals
