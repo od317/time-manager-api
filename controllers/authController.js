@@ -112,6 +112,23 @@ const login = async (req, res) => {
       data: { lastLoginAt: new Date() },
     });
 
+    const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000);
+    prisma.timeEntry
+      .updateMany({
+        where: {
+          userId: user.id,
+          status: "RUNNING",
+          startTime: { lt: twelveHoursAgo },
+        },
+        data: {
+          status: "COMPLETED",
+          endTime: new Date(),
+          duration: 0,
+          note: "Auto-closed (abandoned)",
+        },
+      })
+      .catch(() => {});
+
     // Check for overdue goals
     const { checkOverdueGoals } = require("../services/deadlineService");
     checkOverdueGoals(user.id).catch(console.error);

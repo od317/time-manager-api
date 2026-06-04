@@ -124,7 +124,7 @@ const startTimer = async (req, res) => {
 
     res.status(201).json(timeEntry);
   } catch (error) {
-    console.error(error);
+    console.log(error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -295,7 +295,7 @@ const getRunningTimer = async (req, res) => {
     const runningTimer = await prisma.timeEntry.findFirst({
       where: {
         userId: req.user.id,
-        status: "RUNNING",
+        status: { in: ["RUNNING", "PAUSED"] },
       },
       include: {
         goal: { select: { id: true, title: true, color: true } },
@@ -393,7 +393,6 @@ const updateTimeEntry = async (req, res) => {
       return res.status(404).json({ message: "Time entry not found" });
     }
 
-    // Build update data - only include fields that are provided
     const updateData = {};
 
     if (req.body.goalId !== undefined) {
@@ -401,6 +400,12 @@ const updateTimeEntry = async (req, res) => {
     }
     if (req.body.taskId !== undefined) {
       updateData.taskId = req.body.taskId || null;
+    }
+    if (req.body.status !== undefined) {
+      updateData.status = req.body.status;
+    }
+    if (req.body.duration !== undefined) {
+      updateData.duration = req.body.duration;
     }
 
     const updated = await prisma.timeEntry.update({
