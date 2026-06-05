@@ -1,4 +1,58 @@
+// backend/controllers/goalController.js
 const prisma = require("../utils/prisma");
+
+// Helper: Check and update goal status based on dates and progress
+const refreshGoalStatus = async (goalId) => {
+  const goal = await prisma.goal.findUnique({
+    where: { id: goalId },
+    select: {
+      id: true,
+      status: true,
+      endDate: true,
+      targetValue: true,
+      currentValue: true,
+      goalType: true,
+    },
+  });
+
+  if (!goal) return;
+
+  const now = new Date();
+  let newStatus = goal.status;
+
+  // Don't auto-change COMPLETED, FAILED, or ARCHIVED goals
+  if (["COMPLETED", "FAILED", "ARCHIVED"].includes(goal.status)) {
+    return;
+  }
+
+  // Check if goal is complete (currentValue >= targetValue)
+  if (goal.targetValue && goal.currentValue >= goal.targetValue) {
+    if (goal.status !== "COMPLETED") {
+      newStatus = "COMPLETED";
+    }
+  }
+  // ACTIVE → OVERDUE: Past end date but not complete
+  else if (goal.status === "ACTIVE" && goal.endDate && goal.endDate < now) {
+    newStatus = "OVERDUE";
+  }
+  // OVERDUE → ACTIVE: End date extended to future
+  else if (goal.status === "OVERDUE" && goal.endDate && goal.endDate >= now) {
+    newStatus = "ACTIVE";
+  }
+
+  if (newStatus !== goal.status) {
+    await prisma.goal.update({
+      where: { id: goalId },
+      data: {
+        status: newStatus,
+        ...(newStatus === "COMPLETED" ? { completedAt: now } : {}),
+        failedAt: null, // Clear failedAt when un-failing
+        failureReason: null,
+        lastActivityAt: now,
+      },
+    });
+  }
+};
 
 // @desc    Get all goals for user (with hierarchy)
 // @route   GET /api/goals
@@ -6,7 +60,12 @@ const getGoals = async (req, res) => {
   try {
     const { status } = req.query;
     const where = { userId: req.user.id };
-    if (status) where.status = status;
+
+    if (status) {
+      // Support multiple statuses: ?status=ACTIVE,OVERDUE
+      const statuses = status.split(",").map((s) => s.trim());
+      where.status = { in: statuses };
+    }
 
     const goals = await prisma.goal.findMany({
       where,
@@ -36,18 +95,13 @@ const getGoals = async (req, res) => {
         }
         return ids;
       };
-      const childIds = getAllIds(goal);
+      getAllIds(goal);
 
-      // Get time from sub-goals
+      // Get time from time entries
       let totalTime = (goal.timeEntries || []).reduce(
         (sum, e) => sum + (e.duration || 0),
         0,
       );
-
-      if (childIds.length > 0) {
-        // Add sub-goal time (we don't have it here, so progress stays as-is)
-        // For time-based goals, calculate from currentValue
-      }
 
       // Calculate progress including sub-goals
       let combinedProgress = goal.progress || 0;
@@ -60,9 +114,23 @@ const getGoals = async (req, res) => {
         );
       }
 
+      // Calculate days overdue for OVERDUE goals
+      let daysOverdue = null;
+      if (goal.status === "OVERDUE" && goal.endDate) {
+        daysOverdue = Math.floor(
+          (new Date() - new Date(goal.endDate)) / (1000 * 60 * 60 * 24),
+        );
+      }
+
       return {
         ...goal,
         combinedProgress: Math.max(goal.progress, combinedProgress),
+        daysOverdue,
+        // Add warning if within 48 hours of deadline
+        deadlineUrgent:
+          goal.endDate &&
+          goal.status === "ACTIVE" &&
+          (new Date(goal.endDate) - new Date()) / (1000 * 60 * 60) < 48,
       };
     });
 
@@ -77,6 +145,9 @@ const getGoals = async (req, res) => {
 // @route   GET /api/goals/:id
 const getGoal = async (req, res) => {
   try {
+    // Refresh status before returning
+    await refreshGoalStatus(req.params.id);
+
     const goal = await prisma.goal.findFirst({
       where: {
         id: req.params.id,
@@ -129,7 +200,6 @@ const getGoal = async (req, res) => {
         orderBy: { startTime: "desc" },
       });
 
-      // Add child time entries to the response
       goal.allTimeEntries = [...(goal.timeEntries || []), ...childTimeEntries];
       goal.totalTimeSpent = goal.allTimeEntries.reduce(
         (sum, e) => sum + (e.duration || 0),
@@ -152,10 +222,17 @@ const getGoal = async (req, res) => {
         100,
       );
     } else if (goal.goalType === "quantity" && goal.targetValue) {
-      // For quantity goals, use the stored progress
       goal.combinedProgress = goal.progress || 0;
     } else {
       goal.combinedProgress = goal.progress || 0;
+    }
+
+    // Calculate days overdue
+    goal.daysOverdue = null;
+    if (goal.status === "OVERDUE" && goal.endDate) {
+      goal.daysOverdue = Math.floor(
+        (new Date() - new Date(goal.endDate)) / (1000 * 60 * 60 * 24),
+      );
     }
 
     res.json(goal);
@@ -217,6 +294,15 @@ const createGoal = async (req, res) => {
       goalColor = parentGoal?.color || null;
     }
 
+    const goalEndDate = endDate ? new Date(endDate) : null;
+
+    // Determine initial status
+    let initialStatus = "ACTIVE";
+    const now = new Date();
+    if (goalEndDate && goalEndDate < now) {
+      initialStatus = "OVERDUE"; // Created with past end date
+    }
+
     const goal = await prisma.goal.create({
       data: {
         userId: req.user.id,
@@ -231,8 +317,9 @@ const createGoal = async (req, res) => {
         targetValue,
         unit,
         startDate: startDate ? new Date(startDate) : new Date(),
-        endDate: endDate ? new Date(endDate) : null,
+        endDate: goalEndDate,
         deadlineType: deadlineType || "HARD",
+        status: initialStatus,
         color: goalColor,
         icon,
         isRecurring: isRecurring || false,
@@ -263,7 +350,11 @@ const updateGoal = async (req, res) => {
       return res.status(404).json({ message: "Goal not found" });
     }
 
-    if (req.body.status === "ACTIVE" && existingGoal.parentId) {
+    // If trying to set to ACTIVE and has a completed parent, block it
+    if (
+      (req.body.status === "ACTIVE" || req.body.status === "OVERDUE") &&
+      existingGoal.parentId
+    ) {
       const parentGoal = await prisma.goal.findFirst({
         where: { id: existingGoal.parentId, userId: req.user.id },
         select: { status: true, title: true },
@@ -276,12 +367,12 @@ const updateGoal = async (req, res) => {
       }
     }
 
-    // If trying to complete, check sub-goals
+    // If trying to complete, check sub-goals and tasks
     if (req.body.status === "COMPLETED") {
       const activeSubGoals = await prisma.goal.count({
         where: {
           parentId: req.params.id,
-          status: { in: ["ACTIVE", "PAUSED"] },
+          status: { in: ["ACTIVE", "OVERDUE", "PAUSED"] },
         },
       });
 
@@ -291,11 +382,10 @@ const updateGoal = async (req, res) => {
         });
       }
 
-      // Also check active tasks
       const activeTasks = await prisma.task.count({
         where: {
           goalId: req.params.id,
-          status: { in: ["TODO", "IN_PROGRESS"] },
+          status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] },
         },
       });
 
@@ -304,6 +394,11 @@ const updateGoal = async (req, res) => {
           message: `Cannot complete this goal. ${activeTasks} task(s) are still pending.`,
         });
       }
+    }
+
+    // Allow completing OVERDUE goals
+    if (req.body.status === "COMPLETED" && existingGoal.status === "OVERDUE") {
+      // This is fine - completing an overdue goal
     }
 
     const {
@@ -325,32 +420,65 @@ const updateGoal = async (req, res) => {
       progress,
     } = req.body;
 
-    const goal = await prisma.goal.update({
-      where: { id: req.params.id },
-      data: {
-        title,
-        description,
-        category,
-        tags,
-        priority,
-        targetMetric,
-        targetValue,
-        currentValue,
-        unit,
-        endDate: endDate ? new Date(endDate) : undefined,
-        deadlineType,
-        status,
-        color,
-        icon,
-        sortOrder,
-        progress,
-        completedAt: status === "COMPLETED" ? new Date() : undefined,
-        failedAt: status === "FAILED" ? new Date() : undefined,
-        lastActivityAt: new Date(),
-      },
+    // Build update data
+    const updateData = {
+      title,
+      description,
+      category,
+      tags,
+      priority,
+      targetMetric,
+      targetValue,
+      currentValue,
+      unit,
+      endDate: endDate ? new Date(endDate) : undefined,
+      deadlineType,
+      color,
+      icon,
+      sortOrder,
+      progress,
+      lastActivityAt: new Date(),
+    };
+
+    // Remove undefined values
+    Object.keys(updateData).forEach((key) => {
+      if (updateData[key] === undefined) {
+        delete updateData[key];
+      }
     });
 
-    res.json(goal);
+    // Handle status changes
+    if (status) {
+      updateData.status = status;
+
+      if (status === "COMPLETED") {
+        updateData.completedAt = new Date();
+        updateData.failedAt = null;
+        updateData.failureReason = null;
+      } else if (status === "FAILED") {
+        updateData.failedAt = new Date();
+        updateData.completedAt = null;
+      } else if (status === "ACTIVE" || status === "OVERDUE") {
+        updateData.completedAt = null;
+        updateData.failedAt = null;
+        updateData.failureReason = null;
+      }
+    }
+
+    const goal = await prisma.goal.update({
+      where: { id: req.params.id },
+      data: updateData,
+    });
+
+    // Refresh status after update
+    await refreshGoalStatus(req.params.id);
+
+    // Fetch the refreshed goal
+    const refreshedGoal = await prisma.goal.findUnique({
+      where: { id: req.params.id },
+    });
+
+    res.json(refreshedGoal);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -369,7 +497,6 @@ const deleteGoal = async (req, res) => {
       return res.status(404).json({ message: "Goal not found" });
     }
 
-    // Delete all child goals, tasks, and time entries
     await prisma.goal.delete({
       where: { id: req.params.id },
     });
@@ -385,9 +512,8 @@ const deleteGoal = async (req, res) => {
 // @route   PUT /api/goals/reorder
 const reorderGoals = async (req, res) => {
   try {
-    const { orderedIds } = req.body; // Array of goal IDs in new order
+    const { orderedIds } = req.body;
 
-    // Update sort order for each goal
     const updates = orderedIds.map((id, index) =>
       prisma.goal.updateMany({
         where: { id, userId: req.user.id },
@@ -439,6 +565,9 @@ const getGoalStats = async (req, res) => {
     const completedTasks = goal.tasks.filter(
       (t) => t.status === "COMPLETED",
     ).length;
+    const overdueTasks = goal.tasks.filter(
+      (t) => t.status === "OVERDUE",
+    ).length;
     const totalTimeSpent = goal.timeEntries.reduce(
       (sum, e) => sum + (e.duration || 0),
       0,
@@ -447,11 +576,14 @@ const getGoalStats = async (req, res) => {
     res.json({
       totalTasks,
       completedTasks,
+      overdueTasks,
       completionRate: totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0,
       totalTimeSpent,
       progress: goal.progress,
       childGoalsCount: goal.children.length,
       childGoalsCompleted: goal.children.filter((c) => c.status === "COMPLETED")
+        .length,
+      childGoalsOverdue: goal.children.filter((c) => c.status === "OVERDUE")
         .length,
     });
   } catch (error) {

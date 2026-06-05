@@ -12,6 +12,8 @@ const deadlineRoutes = require("./routes/deadline");
 const errorHandler = require("./middleware/errorHandler");
 const setupRoutes = require("./routes/setup");
 const createRoutes = require("./routes/create");
+const pomodoroRoutes = require("./routes/pomodoro");
+const seedRoutes = require("./routes/seed");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -45,8 +47,10 @@ app.use("/api/ai", aiRoutes);
 app.use("/api/deadline", deadlineRoutes);
 app.use("/api/setup", setupRoutes);
 app.use("/api/create", createRoutes);
-
-
+app.use("/api/pomodoro", pomodoroRoutes);
+if (process.env.NODE_ENV === "development") {
+  app.use("/api/seed", seedRoutes);
+}
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
 });

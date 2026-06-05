@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Goal" ADD COLUMN     "autoFailDays" INTEGER NOT NULL DEFAULT 30;
+
+-- AlterTable
+ALTER TABLE "Task" ADD COLUMN     "autoFailDays" INTEGER NOT NULL DEFAULT 30;
