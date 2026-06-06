@@ -1,4 +1,5 @@
 // backend/controllers/todayController.js
+const prisma = require("../utils/prisma");
 
 const getTodayDashboard = async (req, res) => {
   try {
@@ -351,3 +352,5 @@ function enrichTask(task) {
       new Date(task.dueDate).toDateString() === new Date().toDateString(),
   };
 }
+
+module.exports = { getTodayDashboard };
