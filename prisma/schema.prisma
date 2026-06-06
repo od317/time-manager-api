@@ -20,7 +20,7 @@ model User {
   timezone      String    @default("UTC")
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
-  
+
   emailVerified      Boolean   @default(false)
   verificationToken  String?
   resetToken         String?
@@ -28,10 +28,10 @@ model User {
 
   goals         Goal[]
   habits        Habit[]
-  tasks         Task[]           // ← ADD THIS
+  tasks         Task[]
   timeEntries   TimeEntry[]
   settings      UserSettings?
-  
+
   lastLoginAt   DateTime?
 }
 
@@ -43,7 +43,7 @@ model UserSettings {
   id              String   @id @default(uuid())
   userId          String   @unique
   user            User     @relation(fields: [userId], references: [id])
-  
+
   defaultGracePeriodHours  Int      @default(24)
   autoFailEnabled          Boolean  @default(true)
   habitEvaluationTime      String   @default("23:59")
@@ -54,7 +54,7 @@ model UserSettings {
   pomodoroWorkMinutes      Int      @default(25)
   pomodoroBreakMinutes     Int      @default(5)
   weekStartDay             Int      @default(1)
-  
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -67,56 +67,58 @@ model Goal {
   id              String      @id @default(uuid())
   userId          String
   user            User        @relation(fields: [userId], references: [id])
-  
+
   goalType        String      @default("quantity")
 
   parentId        String?
   parent          Goal?       @relation("GoalHierarchy", fields: [parentId], references: [id])
   children        Goal[]      @relation("GoalHierarchy")
-  
+
   title           String
   description     String?
   category        String?
   tags            String[]
   priority        String      @default("MEDIUM")
-  
+
   targetMetric    String?
   targetValue     Float?
   currentValue    Float       @default(0)
   unit            String?
-  
+
   startDate       DateTime    @default(now())
   endDate         DateTime?
   deadlineType    String      @default("HARD")
   gracePeriodHours Int        @default(24)
   autoFail        Boolean     @default(true)
-  
+
   status          String      @default("ACTIVE")  // ACTIVE, COMPLETED, FAILED, ARCHIVED, OVERDUE
   autoFailDays    Int         @default(30)        // Days until OVERDUE becomes FAILED
   completedAt     DateTime?
   failedAt        DateTime?
   failureReason   String?
   archivedAt      DateTime?
-  
+
   progress        Float       @default(0)
   lastActivityAt  DateTime    @default(now())
-  
+
   color           String?
   icon            String?
   sortOrder       Int         @default(0)
-  
+
   isRecurring     Boolean     @default(false)
   recurringRule   String?
-  
+
   tasks           Task[]
   timeEntries     TimeEntry[]
-  
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
-  
+
   @@index([userId, status])
   @@index([userId, parentId])
   @@index([userId, endDate])
+  @@index([userId, status, priority])
+  @@index([userId, status, endDate])
 }
 
 // ============================================================================
@@ -129,43 +131,45 @@ model Task {
   goalId          String?
 
   color           String?
-  
+
   user            User        @relation(fields: [userId], references: [id])
   goal            Goal?       @relation(fields: [goalId], references: [id])
-  
+
   title           String
   description     String?
   priority        String      @default("MEDIUM")
-  
+
   targetValue     Float?
   currentValue    Float       @default(0)
   unit            String?
-  
+
   dueDate         DateTime?
   estimatedMinutes Int?
   gracePeriodHours Int        @default(24)
   autoFail        Boolean     @default(true)
-  
+
   status          String      @default("TODO")    // TODO, IN_PROGRESS, COMPLETED, FAILED, OVERDUE
   autoFailDays    Int         @default(30)        // Days until OVERDUE becomes FAILED
   completedAt     DateTime?
   failedAt        DateTime?
   failureReason   String?
-  
+
   sortOrder       Int         @default(0)
-  
+
   isRecurring     Boolean     @default(false)
   recurringRule   String?
-  
+
   timeEntries     TimeEntry[]
   checkIns        TaskCheckIn[]
-  
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
-  
+
   @@index([userId, status])
   @@index([userId, dueDate])
   @@index([goalId])
+  @@index([userId, status, dueDate])
+  @@index([userId, status, priority, dueDate])
 }
 
 // ============================================================================
@@ -176,13 +180,13 @@ model TaskCheckIn {
   id          String   @id @default(uuid())
   taskId      String
   task        Task     @relation(fields: [taskId], references: [id])
-  
+
   value       Float?
   duration    Int?
   note        String?
-  
+
   checkedAt   DateTime @default(now())
-  
+
   @@index([taskId])
   @@index([checkedAt])
 }
@@ -195,48 +199,49 @@ model Habit {
   id              String      @id @default(uuid())
   userId          String
   user            User        @relation(fields: [userId], references: [id])
-  
+
   title           String
   description     String?
   category        String?
   tags            String[]
-  
+
   frequencyType   String      @default("DAILY")
   frequencyDays   Int[]
   timesPerDay     Int         @default(1)
   targetTimeWindows String?
-  
+
   targetValue     Float?
   unit            String?
   trackAmount     Boolean     @default(false)
-  
+
   status          String      @default("ACTIVE")
   pausedAt        DateTime?
   archivedAt      DateTime?
-  
+
   currentStreak   Int         @default(0)
   longestStreak   Int         @default(0)
   totalCompletions Int        @default(0)
-  
+
   allowRollover   Boolean     @default(true)
   maxRolloverDays Int         @default(2)
   currentRollovers Int        @default(0)
-  
+
   color           String?
   icon            String?
   sortOrder       Int         @default(0)
-  
+
   lastCompletedAt DateTime?
   lastEvaluatedAt DateTime?
-  
+
   logs            HabitLog[]
   timeEntries     TimeEntry[]
-  
+
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
-  
+
   @@index([userId, status])
   @@index([userId, frequencyType])
+  @@index([userId, status, frequencyType])
 }
 
 // ============================================================================
@@ -247,18 +252,18 @@ model HabitLog {
   id          String   @id @default(uuid())
   habitId     String
   habit       Habit    @relation(fields: [habitId], references: [id])
-  
+
   date        DateTime
   completedAt DateTime @default(now())
-  
+
   value       Float?
   unit        String?
-  
+
   status      String   @default("COMPLETED")
   note        String?
-  
+
   rolledOverFrom DateTime?
-  
+
   @@unique([habitId, date])
   @@index([habitId, date])
   @@index([date])
@@ -272,28 +277,29 @@ model TimeEntry {
   id          String   @id @default(uuid())
   userId      String
   user        User     @relation(fields: [userId], references: [id])
-  
+
   goalId      String?
   goal        Goal?    @relation(fields: [goalId], references: [id])
   taskId      String?
   task        Task?    @relation(fields: [taskId], references: [id])
   habitId     String?
   habit       Habit?   @relation(fields: [habitId], references: [id])
-  
+
   startTime   DateTime
   endTime     DateTime?
   duration    Int?
-  
+
   entryType   String   @default("TIMER")
   status      String   @default("RUNNING")
-  
+
   note        String?
-  
+
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
-  
+
   @@index([userId, startTime])
   @@index([userId, goalId])
   @@index([userId, taskId])
   @@index([userId, habitId])
+  @@index([userId, status])
 }
