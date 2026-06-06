@@ -14,6 +14,7 @@ const setupRoutes = require("./routes/setup");
 const createRoutes = require("./routes/create");
 const pomodoroRoutes = require("./routes/pomodoro");
 const seedRoutes = require("./routes/seed");
+const todayRoutes = require("./routes/today");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -51,6 +52,8 @@ app.use("/api/pomodoro", pomodoroRoutes);
 if (process.env.NODE_ENV === "development") {
   app.use("/api/seed", seedRoutes);
 }
+app.use("/api/today", todayRoutes);
+
 app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date() });
 });
