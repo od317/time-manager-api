@@ -49,9 +49,8 @@ app.use("/api/deadline", deadlineRoutes);
 app.use("/api/setup", setupRoutes);
 app.use("/api/create", createRoutes);
 app.use("/api/pomodoro", pomodoroRoutes);
-if (process.env.NODE_ENV === "development") {
-  app.use("/api/seed", seedRoutes);
-}
+app.use("/api/seed", seedRoutes);
+
 app.use("/api/today", todayRoutes);
 
 app.get("/api/health", (req, res) => {
