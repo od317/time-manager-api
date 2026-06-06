@@ -7,6 +7,7 @@ const {
   updateHabit,
   deleteHabit,
   logHabit,
+  unlogHabit,
   skipHabit,
   getHabitHeatmap,
   getHabitStats,
@@ -24,5 +25,6 @@ router.post("/:id/log", logHabit);
 router.post("/:id/skip", skipHabit);
 router.get("/:id/heatmap", getHabitHeatmap);
 router.get("/:id/stats", getHabitStats);
+router.delete("/:id/log", unlogHabit);
 
 module.exports = router;

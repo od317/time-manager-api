@@ -215,14 +215,17 @@ const logHabit = async (req, res) => {
       return res.status(404).json({ message: "Habit not found" });
     }
 
-    // Use the date from the frontend, or default to today (server date, but frontend will interpret correctly)
+    // Use the date string directly from frontend (e.g., "2026-06-06")
+    // This ensures we use the user's calendar day
     let logDate;
     if (date) {
-      logDate = new Date(date);
+      // If it's already a date string like "2026-06-06", parse it as-is
+      logDate = new Date(date + "T00:00:00.000Z");
     } else {
-      // Just use today's date - frontend will handle timezone display
+      // Fallback: use the date from the frontend
       const now = new Date();
-      logDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const todayStr = now.toISOString().split("T")[0];
+      logDate = new Date(todayStr + "T00:00:00.000Z");
     }
 
     const existingLog = await prisma.habitLog.findUnique({
@@ -414,12 +417,46 @@ async function updateHabitStats(habitId) {
   });
 }
 
+// @desc    Unlog habit completion (remove today's log)
+// @route   DELETE /api/habits/:id/log
+const unlogHabit = async (req, res) => {
+  try {
+    const habitId = req.params.id;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const existingLog = await prisma.habitLog.findUnique({
+      where: {
+        habitId_date: { habitId, date: today },
+      },
+    });
+
+    if (!existingLog) {
+      return res.status(404).json({ message: "No log found for today" });
+    }
+
+    await prisma.habitLog.delete({
+      where: { id: existingLog.id },
+    });
+
+    // Recalculate streaks
+    await updateHabitStats(habitId);
+
+    res.json({ message: "Log removed" });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   getHabits,
   getHabit,
   createHabit,
   updateHabit,
   deleteHabit,
+  unlogHabit,
   logHabit,
   skipHabit,
   getHabitHeatmap,

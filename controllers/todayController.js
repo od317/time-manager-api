@@ -5,13 +5,14 @@ const getTodayDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
     const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-    );
-    const todayEnd = new Date(todayStart.getTime() + 86400000);
-    const tomorrow = new Date(todayStart.getTime() + 86400000);
+    const { date } = req.query;
+    const todayStr = date || new Date().toISOString().split("T")[0];
+
+    const todayStart = new Date(todayStr + "T00:00:00.000Z");
+    const todayEnd = new Date(todayStr + "T00:00:00.000Z");
+    todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
+
+    const tomorrow = new Date(todayEnd);
 
     // ========================================================================
     // GOALS: Select only needed fields
@@ -103,7 +104,7 @@ const getTodayDashboard = async (req, res) => {
     // ========================================================================
     // HABITS: Select only needed fields
     // ========================================================================
-    const dayOfWeek = todayStart.getDay();
+    const dayOfWeek = todayStart.getUTCDay();
 
     const allActiveHabits = await prisma.habit.findMany({
       where: {
@@ -254,7 +255,7 @@ const getTodayDashboard = async (req, res) => {
     const enrichedTasks = tasks.map(enrichTask);
 
     res.json({
-      date: todayStart.toISOString().split("T")[0],
+      date: todayStr,
       goals: enrichedGoals,
       habits: enrichedHabits,
       runningTimer,
