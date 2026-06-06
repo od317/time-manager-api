@@ -56,19 +56,67 @@ const refreshGoalStatus = async (goalId) => {
 
 // @desc    Get all goals for user (with hierarchy)
 // @route   GET /api/goals
+// backend/controllers/goalController.js
+
+// backend/controllers/goalController.js
+
 const getGoals = async (req, res) => {
   try {
-    const { status } = req.query;
+    const { status, page, limit, sortBy, sortOrder, paginated } = req.query;
+
+    // Check if pagination is disabled
+    const isPaginated = paginated !== "false";
+
+    // Build where clause
     const where = { userId: req.user.id };
 
     if (status) {
-      // Support multiple statuses: ?status=ACTIVE,OVERDUE
       const statuses = status.split(",").map((s) => s.trim());
       where.status = { in: statuses };
     }
 
+    // Sorting
+    const orderField = sortBy || "sortOrder";
+    const orderDirection = sortOrder === "desc" ? "desc" : "asc";
+
+    if (!isPaginated) {
+      // ==========================================
+      // NO PAGINATION - Return all results
+      // ==========================================
+      const goals = await prisma.goal.findMany({
+        where,
+        include: {
+          children: {
+            include: {
+              tasks: true,
+              children: true,
+            },
+          },
+          tasks: true,
+          timeEntries: true,
+          _count: { select: { timeEntries: true } },
+        },
+        orderBy: [{ [orderField]: orderDirection }, { createdAt: "desc" }],
+      });
+
+      const enrichedGoals = goals.map(enrichGoal);
+
+      return res.json(enrichedGoals); // Flat array, backward compatible
+    }
+
+    // ==========================================
+    // PAGINATED - Return with metadata
+    // ==========================================
+    const pageNum = Math.max(1, parseInt(page) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const total = await prisma.goal.count({ where });
+
     const goals = await prisma.goal.findMany({
       where,
+      skip,
+      take: limitNum,
       include: {
         children: {
           include: {
@@ -80,66 +128,63 @@ const getGoals = async (req, res) => {
         timeEntries: true,
         _count: { select: { timeEntries: true } },
       },
-      orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
+      orderBy: [{ [orderField]: orderDirection }, { createdAt: "desc" }],
     });
 
-    // Calculate combined progress for each goal
-    const enrichedGoals = goals.map((goal) => {
-      // Get all sub-goal IDs
-      const getAllIds = (g, ids = []) => {
-        if (g.children) {
-          g.children.forEach((child) => {
-            ids.push(child.id);
-            getAllIds(child, ids);
-          });
-        }
-        return ids;
-      };
-      getAllIds(goal);
+    const enrichedGoals = goals.map(enrichGoal);
 
-      // Get time from time entries
-      let totalTime = (goal.timeEntries || []).reduce(
-        (sum, e) => sum + (e.duration || 0),
-        0,
-      );
+    const totalPages = Math.ceil(total / limitNum);
 
-      // Calculate progress including sub-goals
-      let combinedProgress = goal.progress || 0;
-      if (goal.goalType === "time" && goal.targetValue) {
-        const trackedInUnit =
-          goal.unit === "minutes" ? totalTime / 60 : totalTime / 3600;
-        combinedProgress = Math.min(
-          (trackedInUnit / goal.targetValue) * 100,
-          100,
-        );
-      }
-
-      // Calculate days overdue for OVERDUE goals
-      let daysOverdue = null;
-      if (goal.status === "OVERDUE" && goal.endDate) {
-        daysOverdue = Math.floor(
-          (new Date() - new Date(goal.endDate)) / (1000 * 60 * 60 * 24),
-        );
-      }
-
-      return {
-        ...goal,
-        combinedProgress: Math.max(goal.progress, combinedProgress),
-        daysOverdue,
-        // Add warning if within 48 hours of deadline
-        deadlineUrgent:
-          goal.endDate &&
-          goal.status === "ACTIVE" &&
-          (new Date(goal.endDate) - new Date()) / (1000 * 60 * 60) < 48,
-      };
+    res.json({
+      data: enrichedGoals,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        totalPages,
+        hasNextPage: pageNum < totalPages,
+        hasPrevPage: pageNum > 1,
+        nextPage: pageNum < totalPages ? pageNum + 1 : null,
+        prevPage: pageNum > 1 ? pageNum - 1 : null,
+      },
     });
-
-    res.json(enrichedGoals);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// Helper function to avoid code duplication
+function enrichGoal(goal) {
+  let totalTime = (goal.timeEntries || []).reduce(
+    (sum, e) => sum + (e.duration || 0),
+    0,
+  );
+
+  let combinedProgress = goal.progress || 0;
+  if (goal.goalType === "time" && goal.targetValue) {
+    const trackedInUnit =
+      goal.unit === "minutes" ? totalTime / 60 : totalTime / 3600;
+    combinedProgress = Math.min((trackedInUnit / goal.targetValue) * 100, 100);
+  }
+
+  let daysOverdue = null;
+  if (goal.status === "OVERDUE" && goal.endDate) {
+    daysOverdue = Math.floor(
+      (new Date() - new Date(goal.endDate)) / (1000 * 60 * 60 * 24),
+    );
+  }
+
+  return {
+    ...goal,
+    combinedProgress: Math.max(goal.progress, combinedProgress),
+    daysOverdue,
+    deadlineUrgent:
+      goal.endDate &&
+      goal.status === "ACTIVE" &&
+      (new Date(goal.endDate) - new Date()) / (1000 * 60 * 60) < 48,
+  };
+}
 
 // @desc    Get single goal
 // @route   GET /api/goals/:id
