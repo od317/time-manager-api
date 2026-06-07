@@ -73,8 +73,7 @@ router.get("/running", async (req, res) => {
   }
 });
 
-
-
+// GET /api/time-entries/summary
 // GET /api/time-entries/summary
 router.get("/summary", async (req, res) => {
   try {
@@ -109,30 +108,21 @@ router.get("/summary", async (req, res) => {
       },
     });
 
-    const byGoal = {};
-    const byHabit = {};
+    // ========================================
+    // STEP 1: Group by goal (direct time only)
+    // ========================================
+    const directByGoal = {};
     const byTask = {};
+    const byHabit = {};
     let totalTime = 0;
     let unassigned = 0;
+
+    // Collect taskIds with null goalId to look up their parent goals
+    const orphanTaskIds = new Set();
 
     timeEntries.forEach((entry) => {
       const duration = entry.duration || 0;
       totalTime += duration;
-
-      if (entry.goal) {
-        const key = entry.goal.id;
-        if (!byGoal[key]) {
-          byGoal[key] = {
-            id: key,
-            title: entry.goal.title,
-            color: entry.goal.color,
-            totalDuration: 0,
-            entries: [],
-          };
-        }
-        byGoal[key].totalDuration += duration;
-        byGoal[key].entries.push(entry);
-      }
 
       if (entry.task) {
         const key = entry.task.id;
@@ -146,6 +136,26 @@ router.get("/summary", async (req, res) => {
         }
         byTask[key].totalDuration += duration;
         byTask[key].entries.push(entry);
+
+        // Track tasks with no direct goal for later lookup
+        if (!entry.goalId) {
+          orphanTaskIds.add(entry.task.id);
+        }
+      }
+
+      if (entry.goal) {
+        const key = entry.goal.id;
+        if (!directByGoal[key]) {
+          directByGoal[key] = {
+            id: key,
+            title: entry.goal.title,
+            color: entry.goal.color,
+            totalDuration: 0,
+            entries: [],
+          };
+        }
+        directByGoal[key].totalDuration += duration;
+        directByGoal[key].entries.push(entry);
       }
 
       if (entry.habit) {
@@ -166,12 +176,104 @@ router.get("/summary", async (req, res) => {
       if (!entry.goal && !entry.habit) unassigned += duration;
     });
 
+    // ========================================
+    // STEP 2: Look up parent goals for orphan tasks
+    // ========================================
+    const taskGoalMap = {};
+    if (orphanTaskIds.size > 0) {
+      const tasks = await prisma.task.findMany({
+        where: { id: { in: [...orphanTaskIds] } },
+        select: { id: true, goalId: true },
+      });
+      tasks.forEach((t) => {
+        taskGoalMap[t.id] = t.goalId;
+      });
+
+      // Add orphan task time to their parent goal
+      for (const taskId of orphanTaskIds) {
+        const goalId = taskGoalMap[taskId];
+        if (goalId && !directByGoal[goalId]) {
+          // Fetch goal info if not already in directByGoal
+          const goal = await prisma.goal.findUnique({
+            where: { id: goalId },
+            select: { id: true, title: true, color: true },
+          });
+          if (goal) {
+            directByGoal[goal.id] = {
+              id: goal.id,
+              title: goal.title,
+              color: goal.color,
+              totalDuration: 0,
+              entries: [],
+            };
+          }
+        }
+        if (goalId && directByGoal[goalId]) {
+          const taskDuration = byTask[taskId]?.totalDuration || 0;
+          // Don't double-count if already counted via direct goalId
+        }
+      }
+    }
+
+    // ========================================
+    // STEP 3: Build goal hierarchy and roll up
+    // ========================================
+    const allGoalIds = Object.keys(directByGoal);
+    const allGoals = await prisma.goal.findMany({
+      where: { id: { in: allGoalIds } },
+      select: { id: true, parentId: true },
+    });
+
+    const parentMap = {};
+    allGoals.forEach((g) => {
+      parentMap[g.id] = g.parentId;
+    });
+
+    // Calculate rolled-up time (direct + all descendants)
+    function getRolledUpTime(goalId, visited = new Set()) {
+      if (visited.has(goalId)) return 0; // Prevent circular
+      visited.add(goalId);
+
+      let total = directByGoal[goalId]?.totalDuration || 0;
+
+      // Add time from all children
+      for (const childId of allGoalIds) {
+        if (parentMap[childId] === goalId) {
+          total += getRolledUpTime(childId, visited);
+        }
+      }
+
+      return total;
+    }
+
+    // ========================================
+    // STEP 4: Format output
+    // ========================================
     const formatGroup = (group) =>
+      Object.values(group).map((item) => {
+        const rolledUp = getRolledUpTime(item.id);
+        return {
+          ...item,
+          totalDuration: rolledUp, // Use rolled-up time
+          directDuration: item.totalDuration, // Original direct time
+          childrenDuration: rolledUp - item.totalDuration,
+          totalDurationSeconds: rolledUp,
+          totalDurationMinutes: Math.round((rolledUp / 60) * 100) / 100,
+          totalDurationHours: Math.round((rolledUp / 3600) * 100) / 100,
+          durationFormatted: formatDuration(rolledUp),
+          percentage:
+            totalTime > 0
+              ? Math.round((rolledUp / totalTime) * 10000) / 100
+              : 0,
+        };
+      });
+
+    const formatTaskGroup = (group) =>
       Object.values(group).map((item) => ({
         ...item,
-        totalDurationSeconds: item.totalDuration, // Raw seconds
-        totalDurationMinutes: Math.round((item.totalDuration / 60) * 100) / 100, // Minutes
-        totalDurationHours: Math.round((item.totalDuration / 3600) * 100) / 100, // Hours
+        totalDurationSeconds: item.totalDuration,
+        totalDurationMinutes: Math.round((item.totalDuration / 60) * 100) / 100,
+        totalDurationHours: Math.round((item.totalDuration / 3600) * 100) / 100,
         durationFormatted: formatDuration(item.totalDuration),
         percentage:
           totalTime > 0
@@ -184,10 +286,12 @@ router.get("/summary", async (req, res) => {
       startDate,
       endDate: now,
       totalTime: formatDuration(totalTime),
+      totalTimeSeconds: totalTime,
       unassigned: formatDuration(unassigned),
-      byGoal: formatGroup(byGoal),
-      byTask: formatGroup(byTask),
-      byHabit: formatGroup(byHabit),
+      unassignedSeconds: unassigned,
+      byGoal: formatGroup(directByGoal),
+      byTask: formatTaskGroup(byTask),
+      byHabit: formatTaskGroup(byHabit),
       entryCount: timeEntries.length,
     });
   } catch (error) {
