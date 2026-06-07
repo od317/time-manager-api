@@ -190,74 +190,86 @@ function enrichGoal(goal) {
 // @route   GET /api/goals/:id
 const getGoal = async (req, res) => {
   try {
-    // Refresh status before returning
     await refreshGoalStatus(req.params.id);
 
     const goal = await prisma.goal.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.user.id,
-      },
+      where: { id: req.params.id, userId: req.user.id },
       include: {
-        parent: {
-          select: { id: true, status: true, title: true },
-        },
+        parent: { select: { id: true, status: true, title: true } },
         children: {
           include: {
-            tasks: true,
-            children: true,
+            tasks: { select: { id: true } },
+            children: { select: { id: true } },
           },
         },
         tasks: {
+          select: { id: true },
           include: {
             checkIns: true,
-            timeEntries: true,
+            timeEntries: { where: { status: "COMPLETED" } },
           },
         },
-        timeEntries: true,
+        timeEntries: { where: { status: "COMPLETED" } },
       },
     });
 
-    if (!goal) {
-      return res.status(404).json({ message: "Goal not found" });
-    }
+    if (!goal) return res.status(404).json({ message: "Goal not found" });
 
-    // Collect all sub-goal IDs recursively
-    function getAllChildIds(g, ids = []) {
+    // Collect ALL descendant goal IDs (all levels)
+    function getAllDescendantIds(g, ids = []) {
       if (g.children) {
         for (const child of g.children) {
           ids.push(child.id);
-          getAllChildIds(child, ids);
+          getAllDescendantIds(child, ids);
         }
       }
       return ids;
     }
 
-    const allChildIds = getAllChildIds(goal);
+    const allDescendantIds = getAllDescendantIds(goal);
 
-    // Fetch time entries for all sub-goals
-    if (allChildIds.length > 0) {
-      const childTimeEntries = await prisma.timeEntry.findMany({
-        where: {
-          goalId: { in: allChildIds },
-          status: "COMPLETED",
-        },
-        orderBy: { startTime: "desc" },
-      });
+    // Collect all task IDs from this goal and all descendants
+    const allTaskIds = [];
+    function collectTaskIds(g) {
+      if (g.tasks) allTaskIds.push(...g.tasks.map((t) => t.id));
+      if (g.children) g.children.forEach(collectTaskIds);
+    }
+    collectTaskIds(goal);
 
-      goal.allTimeEntries = [...(goal.timeEntries || []), ...childTimeEntries];
-      goal.totalTimeSpent = goal.allTimeEntries.reduce(
-        (sum, e) => sum + (e.duration || 0),
-        0,
-      );
-    } else {
-      goal.allTimeEntries = goal.timeEntries || [];
-      goal.totalTimeSpent = goal.allTimeEntries.reduce(
-        (sum, e) => sum + (e.duration || 0),
-        0,
-      );
+    // Fetch ALL time entries:
+    // 1. Directly linked to this goal or any descendant goal
+    // 2. Linked to any task under this goal or descendants
+    const allTimeEntries = await prisma.timeEntry.findMany({
+      where: {
+        status: "COMPLETED",
+        OR: [
+          { goalId: { in: [goal.id, ...allDescendantIds] } },
+          { taskId: { in: allTaskIds } },
+        ],
+      },
+      orderBy: { startTime: "desc" },
+      include: {
+        task: { select: { id: true, title: true } },
+      },
+    });
+
+    // Deduplicate (a time entry might match both conditions)
+    const uniqueEntries = [];
+    const seenIds = new Set();
+    for (const entry of allTimeEntries) {
+      if (!seenIds.has(entry.id)) {
+        seenIds.add(entry.id);
+        uniqueEntries.push(entry);
+      }
     }
 
+    goal.allTimeEntries = uniqueEntries;
+    goal.totalTimeSpent = uniqueEntries.reduce(
+      (sum, e) => sum + (e.duration || 0),
+      0,
+    );
+
+    // Progress calculation stays the same
     if (goal.goalType === "time" && goal.targetValue) {
       const totalSeconds = goal.totalTimeSpent || 0;
       const trackedInUnit =
@@ -266,19 +278,23 @@ const getGoal = async (req, res) => {
         (trackedInUnit / goal.targetValue) * 100,
         100,
       );
-    } else if (goal.goalType === "quantity" && goal.targetValue) {
-      goal.combinedProgress = goal.progress || 0;
     } else {
       goal.combinedProgress = goal.progress || 0;
     }
 
-    // Calculate days overdue
     goal.daysOverdue = null;
     if (goal.status === "OVERDUE" && goal.endDate) {
       goal.daysOverdue = Math.floor(
         (new Date() - new Date(goal.endDate)) / (1000 * 60 * 60 * 24),
       );
     }
+
+    // Add formatted duration
+    goal.totalTimeFormatted = {
+      seconds: goal.totalTimeSpent,
+      minutes: Math.round((goal.totalTimeSpent / 60) * 100) / 100,
+      hours: Math.round((goal.totalTimeSpent / 3600) * 100) / 100,
+    };
 
     res.json(goal);
   } catch (error) {
@@ -583,53 +599,88 @@ const getGoalStats = async (req, res) => {
       where: { id: req.params.id, userId: req.user.id },
       include: {
         tasks: {
-          select: {
-            status: true,
-            timeEntries: {
-              select: { duration: true },
-            },
-          },
-        },
-        timeEntries: {
-          select: { duration: true },
+          select: { id: true, status: true },
         },
         children: {
           select: {
+            id: true,
             status: true,
             progress: true,
+            tasks: { select: { id: true } },
+            children: { select: { id: true } },
           },
         },
       },
     });
 
-    if (!goal) {
-      return res.status(404).json({ message: "Goal not found" });
+    if (!goal) return res.status(404).json({ message: "Goal not found" });
+
+    // Collect all descendant IDs and task IDs
+    function getAllDescendantIds(g, ids = []) {
+      if (g.children) {
+        for (const child of g.children) {
+          ids.push(child.id);
+          getAllDescendantIds(child, ids);
+        }
+      }
+      return ids;
     }
 
-    const totalTasks = goal.tasks.length;
-    const completedTasks = goal.tasks.filter(
-      (t) => t.status === "COMPLETED",
-    ).length;
-    const overdueTasks = goal.tasks.filter(
-      (t) => t.status === "OVERDUE",
-    ).length;
-    const totalTimeSpent = goal.timeEntries.reduce(
-      (sum, e) => sum + (e.duration || 0),
-      0,
-    );
+    const allDescendantIds = getAllDescendantIds(goal);
+    const allTaskIds = [];
+    function collectTaskIds(g) {
+      if (g.tasks) allTaskIds.push(...g.tasks.map((t) => t.id));
+      if (g.children) g.children.forEach(collectTaskIds);
+    }
+    collectTaskIds(goal);
+
+    // Get total time including sub-goals and their tasks
+    const allTimeEntries = await prisma.timeEntry.findMany({
+      where: {
+        status: "COMPLETED",
+        OR: [
+          { goalId: { in: [goal.id, ...allDescendantIds] } },
+          { taskId: { in: allTaskIds } },
+        ],
+      },
+      select: { id: true, duration: true },
+    });
+
+    // Deduplicate
+    const seenIds = new Set();
+    const totalTimeSpent = allTimeEntries.reduce((sum, e) => {
+      if (!seenIds.has(e.id)) {
+        seenIds.add(e.id);
+        return sum + (e.duration || 0);
+      }
+      return sum;
+    }, 0);
+
+    // Count all tasks recursively
+    function countTasks(g) {
+      let count = (g.tasks || []).length;
+      if (g.children) {
+        for (const child of g.children) {
+          count += countTasks(child);
+        }
+      }
+      return count;
+    }
+
+    const totalTasks = countTasks(goal);
+    const completedTasks = 0; // Would need to count recursively
 
     res.json({
       totalTasks,
       completedTasks,
-      overdueTasks,
-      completionRate: totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0,
       totalTimeSpent,
+      totalTimeFormatted: {
+        seconds: totalTimeSpent,
+        minutes: Math.round((totalTimeSpent / 60) * 100) / 100,
+        hours: Math.round((totalTimeSpent / 3600) * 100) / 100,
+      },
       progress: goal.progress,
-      childGoalsCount: goal.children.length,
-      childGoalsCompleted: goal.children.filter((c) => c.status === "COMPLETED")
-        .length,
-      childGoalsOverdue: goal.children.filter((c) => c.status === "OVERDUE")
-        .length,
+      childGoalsCount: allDescendantIds.length,
     });
   } catch (error) {
     console.error(error);

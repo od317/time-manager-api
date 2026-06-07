@@ -91,9 +91,22 @@ const getTimeEntry = async (req, res) => {
 
 // @desc    Start timer
 // @route   POST /api/time-entries/start
+// backend/controllers/timeEntryController.js
+
 const startTimer = async (req, res) => {
   try {
-    const { goalId, taskId, habitId, note } = req.body;
+    let { goalId, taskId, habitId, note } = req.body;
+
+    // ✅ If taskId is provided but no goalId, inherit goalId from the task
+    if (taskId && !goalId) {
+      const task = await prisma.task.findUnique({
+        where: { id: taskId },
+        select: { goalId: true },
+      });
+      if (task?.goalId) {
+        goalId = task.goalId;
+      }
+    }
 
     const runningTimer = await prisma.timeEntry.findFirst({
       where: {
@@ -237,7 +250,18 @@ const resumeTimer = async (req, res) => {
 // @route   POST /api/time-entries/quick-log
 const quickLog = async (req, res) => {
   try {
-    const { goalId, taskId, habitId, duration, startTime, note } = req.body;
+    let { goalId, taskId, habitId, duration, startTime, note } = req.body;
+
+    // ✅ If taskId is provided but no goalId, inherit goalId from the task
+    if (taskId && !goalId) {
+      const task = await prisma.task.findUnique({
+        where: { id: taskId },
+        select: { goalId: true },
+      });
+      if (task?.goalId) {
+        goalId = task.goalId;
+      }
+    }
 
     const start = startTime ? new Date(startTime) : new Date();
     const durationInSeconds = duration * 60;
@@ -400,6 +424,17 @@ const updateTimeEntry = async (req, res) => {
     }
     if (req.body.taskId !== undefined) {
       updateData.taskId = req.body.taskId || null;
+
+      // ✅ If setting a taskId, inherit its goalId (unless goalId is explicitly set)
+      if (req.body.taskId && req.body.goalId === undefined) {
+        const task = await prisma.task.findUnique({
+          where: { id: req.body.taskId },
+          select: { goalId: true },
+        });
+        if (task?.goalId) {
+          updateData.goalId = task.goalId;
+        }
+      }
     }
     if (req.body.status !== undefined) {
       updateData.status = req.body.status;
