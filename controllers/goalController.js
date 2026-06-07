@@ -203,13 +203,17 @@ const getGoal = async (req, res) => {
           },
         },
         tasks: {
-          select: { id: true },
           include: {
+            // ✅ Use include only
             checkIns: true,
-            timeEntries: { where: { status: "COMPLETED" } },
+            timeEntries: {
+              where: { status: "COMPLETED" },
+            },
           },
         },
-        timeEntries: { where: { status: "COMPLETED" } },
+        timeEntries: {
+          where: { status: "COMPLETED" },
+        },
       },
     });
 
