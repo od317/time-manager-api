@@ -167,6 +167,9 @@ router.get("/summary", async (req, res) => {
     const formatGroup = (group) =>
       Object.values(group).map((item) => ({
         ...item,
+        totalDurationSeconds: item.totalDuration, // Raw seconds
+        totalDurationMinutes: Math.round((item.totalDuration / 60) * 100) / 100, // Minutes
+        totalDurationHours: Math.round((item.totalDuration / 3600) * 100) / 100, // Hours
         durationFormatted: formatDuration(item.totalDuration),
         percentage:
           totalTime > 0
