@@ -1,6 +1,112 @@
 // backend/controllers/todayController.js
 const prisma = require("../utils/prisma");
 
+// ============================================================================
+// RECURSIVE DESCENDANTS FETCHER
+// ============================================================================
+async function fetchDescendants(parentIds, selectFields) {
+  if (!parentIds.length) return [];
+
+  const children = await prisma.goal.findMany({
+    where: {
+      parentId: { in: parentIds },
+      status: { in: ["ACTIVE", "OVERDUE"] },
+    },
+    select: {
+      ...selectFields,
+      tasks: {
+        where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          priority: true,
+          dueDate: true,
+          estimatedMinutes: true,
+          targetValue: true,
+          currentValue: true,
+          color: true,
+        },
+        orderBy: [{ priority: "asc" }, { dueDate: "asc" }],
+      },
+    },
+    orderBy: [{ sortOrder: "asc" }],
+  });
+
+  if (!children.length) return [];
+
+  // Recursively fetch deeper children
+  const childIds = children.map((c) => c.id);
+  const deeper = await fetchDescendants(childIds, selectFields);
+
+  // Attach deeper children to their immediate parents
+  return children.map((child) => ({
+    ...child,
+    children: deeper.filter((d) => d.parentId === child.id),
+  }));
+}
+
+async function fetchGoalTree(parentIds, selectFields) {
+  if (!parentIds.length) return [];
+
+  const children = await prisma.goal.findMany({
+    where: {
+      parentId: { in: parentIds },
+      status: { in: ["ACTIVE", "OVERDUE"] },
+    },
+    select: {
+      ...selectFields,
+      parentId: true,
+      tasks: {
+        where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
+        select: {
+          id: true,
+          title: true,
+          status: true,
+          priority: true,
+          dueDate: true,
+          estimatedMinutes: true,
+          targetValue: true,
+          currentValue: true,
+          color: true,
+        },
+        orderBy: [{ priority: "asc" }, { dueDate: "asc" }],
+      },
+    },
+    orderBy: [{ sortOrder: "asc" }],
+  });
+
+  if (!children.length) return [];
+
+  // Get IDs of these children to fetch their children
+  const childIds = children.map((c) => c.id);
+
+  // Recursively fetch the next level
+  const grandchildren = await fetchGoalTree(childIds, selectFields);
+
+  // Attach grandchildren to their parents
+  return children.map((child) => ({
+    ...child,
+    children: grandchildren.filter((gc) => gc.parentId === child.id),
+  }));
+}
+
+// ============================================================================
+// BUILD TREE FROM FLAT LIST
+// ============================================================================
+function buildTree(goals, descendants) {
+  return goals.map((goal) => ({
+    ...goal,
+    children: buildTree(
+      descendants.filter((d) => d.parentId === goal.id),
+      descendants,
+    ),
+  }));
+}
+
+// ============================================================================
+// MAIN CONTROLLER
+// ============================================================================
 const getTodayDashboard = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -11,69 +117,46 @@ const getTodayDashboard = async (req, res) => {
     const todayStart = new Date(todayStr + "T00:00:00.000Z");
     const todayEnd = new Date(todayStr + "T00:00:00.000Z");
     todayEnd.setUTCDate(todayEnd.getUTCDate() + 1);
-
     const tomorrow = new Date(todayEnd);
+    const dayOfWeek = todayStart.getUTCDay();
 
     // ========================================================================
-    // GOALS: Select only needed fields
+    // GOAL SELECT FIELDS (shared between root and descendants)
     // ========================================================================
-    const goals = await prisma.goal.findMany({
+    const goalSelectFields = {
+      id: true,
+      parentId: true,
+      title: true,
+      description: true,
+      goalType: true,
+      status: true,
+      priority: true,
+      targetValue: true,
+      currentValue: true,
+      unit: true,
+      progress: true,
+      endDate: true,
+      deadlineType: true,
+      color: true,
+      icon: true,
+      sortOrder: true,
+      isRecurring: true,
+      recurringRule: true,
+      lastActivityAt: true,
+    };
+
+    // ========================================================================
+    // GOALS: Fetch root goals + all descendants recursively
+    // ========================================================================
+    const rootGoals = await prisma.goal.findMany({
       where: {
         userId,
         status: { in: ["ACTIVE", "OVERDUE"] },
         parentId: null,
       },
       select: {
-        id: true,
-        title: true,
-        description: true,
-        goalType: true,
-        status: true,
-        priority: true,
-        targetValue: true,
-        currentValue: true,
-        unit: true,
-        progress: true,
-        endDate: true,
-        deadlineType: true,
-        color: true,
-        icon: true,
-        sortOrder: true,
-        isRecurring: true,
-        recurringRule: true,
-        lastActivityAt: true,
-        // Nested selects
-        children: {
-          where: { status: { in: ["ACTIVE", "OVERDUE"] } },
-          select: {
-            id: true,
-            title: true,
-            status: true,
-            priority: true,
-            targetValue: true,
-            currentValue: true,
-            progress: true,
-            endDate: true,
-            color: true,
-            icon: true,
-            sortOrder: true,
-            tasks: {
-              where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
-              select: {
-                id: true,
-                title: true,
-                status: true,
-                priority: true,
-                dueDate: true,
-                estimatedMinutes: true,
-                targetValue: true,
-                currentValue: true,
-              },
-              orderBy: [{ priority: "asc" }, { dueDate: "asc" }],
-            },
-          },
-          orderBy: [{ sortOrder: "asc" }],
-        },
+        ...goalSelectFields,
+        parentId: true,
         tasks: {
           where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
           select: {
@@ -91,21 +174,25 @@ const getTodayDashboard = async (req, res) => {
         },
         timeEntries: {
           where: { startTime: { gte: todayStart } },
-          select: {
-            id: true,
-            duration: true,
-            status: true,
-          },
+          select: { id: true, duration: true, status: true },
         },
       },
       orderBy: [{ status: "asc" }, { priority: "asc" }, { sortOrder: "asc" }],
     });
 
+    // Fetch all descendants recursively
+    const rootIds = rootGoals.map((g) => g.id);
+    const allDescendants = await fetchGoalTree(rootIds, goalSelectFields);
+
+    // Attach descendants to root goals
+    const goals = rootGoals.map((root) => ({
+      ...root,
+      children: allDescendants.filter((d) => d.parentId === root.id),
+    }));
+
     // ========================================================================
     // HABITS: Select only needed fields
     // ========================================================================
-    const dayOfWeek = todayStart.getUTCDay();
-
     const allActiveHabits = await prisma.habit.findMany({
       where: {
         userId,
@@ -183,39 +270,59 @@ const getTodayDashboard = async (req, res) => {
     // ========================================================================
     // TASKS: Select only needed fields
     // ========================================================================
+    // backend/controllers/todayController.js
+
+    // ========================================================================
+    // TASKS: Select only needed fields
+    // ========================================================================
     const tasks = await prisma.task.findMany({
       where: {
         userId,
-        OR: [
-          {
-            status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] },
-            dueDate: { lt: tomorrow },
-          },
-          {
-            status: "COMPLETED",
-            completedAt: { gte: todayStart, lt: todayEnd },
-          },
-        ],
+        dueDate: {
+          gte: todayStart,
+          lt: todayEnd,
+        },
       },
       select: {
+        // All task fields (matching the format you want)
         id: true,
+        userId: true,
+        goalId: true,
+        color: true,
         title: true,
         description: true,
-        status: true,
         priority: true,
-        dueDate: true,
-        estimatedMinutes: true,
         targetValue: true,
         currentValue: true,
+        unit: true,
+        dueDate: true,
+        estimatedMinutes: true,
+        gracePeriodHours: true,
+        autoFail: true,
+        status: true,
+        autoFailDays: true,
         completedAt: true,
-        color: true,
-        goal: { select: { id: true, title: true, color: true } },
+        failedAt: true,
+        failureReason: true,
+        sortOrder: true,
+        isRecurring: true,
+        recurringRule: true,
+        createdAt: true,
+        updatedAt: true,
+        // Include goal reference
+        goal: {
+          select: {
+            id: true,
+            title: true,
+            color: true,
+          },
+        },
       },
       orderBy: [{ status: "asc" }, { priority: "asc" }, { dueDate: "asc" }],
     });
 
     // ========================================================================
-    // STATS: Use count with where only (no select needed)
+    // STATS
     // ========================================================================
     const [
       activeGoalsCount,
@@ -249,11 +356,16 @@ const getTodayDashboard = async (req, res) => {
       }),
     ]);
 
-    // Enrichment functions (same as before, just with fewer fields)
+    // ========================================================================
+    // ENRICH DATA
+    // ========================================================================
     const enrichedGoals = goals.map(enrichGoal);
     const enrichedHabits = allActiveHabits.map(enrichHabit);
     const enrichedTasks = tasks.map(enrichTask);
 
+    // ========================================================================
+    // RESPONSE
+    // ========================================================================
     res.json({
       date: todayStr,
       goals: enrichedGoals,
@@ -277,7 +389,10 @@ const getTodayDashboard = async (req, res) => {
   }
 };
 
-// Lightweight enrichment functions
+// ============================================================================
+// ENRICHMENT FUNCTIONS
+// ============================================================================
+
 function enrichGoal(goal) {
   const now = new Date();
   let totalTime = (goal.timeEntries || []).reduce(
@@ -299,8 +414,12 @@ function enrichGoal(goal) {
     );
   }
 
+  // Recursively enrich children
+  const enrichedChildren = (goal.children || []).map(enrichGoal);
+
   return {
     ...goal,
+    children: enrichedChildren,
     combinedProgress: Math.max(goal.progress, combinedProgress),
     daysOverdue,
     deadlineUrgent:

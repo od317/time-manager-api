@@ -7,7 +7,7 @@ const auth = require("../middleware/auth");
 router.use(auth);
 
 // Helper: Refresh task status
-const refreshTaskStatus = async (taskId) => {
+const refreshTaskStatus = async (taskId, userDate) => {
   const task = await prisma.task.findUnique({
     where: { id: taskId },
     select: {
@@ -21,7 +21,11 @@ const refreshTaskStatus = async (taskId) => {
 
   if (!task) return;
 
-  const now = new Date();
+  // Use user's date or fallback to UTC midnight
+  const now = userDate
+    ? new Date(userDate + "T00:00:00.000Z")
+    : new Date(new Date().toISOString().split("T")[0] + "T00:00:00.000Z");
+
   let newStatus = task.status;
 
   // Don't auto-change COMPLETED or FAILED tasks
@@ -51,7 +55,7 @@ const refreshTaskStatus = async (taskId) => {
       where: { id: taskId },
       data: {
         status: newStatus,
-        ...(newStatus === "COMPLETED" ? { completedAt: now } : {}),
+        ...(newStatus === "COMPLETED" ? { completedAt: new Date() } : {}),
         failedAt: null,
         failureReason: null,
       },
@@ -62,7 +66,12 @@ const refreshTaskStatus = async (taskId) => {
 // Get all tasks
 router.get("/", async (req, res) => {
   try {
-    const { status, goalId } = req.query;
+    const { status, goalId, date } = req.query; // ← Accept date param
+
+    // Use user's date for "today" calculations
+    const userToday = date
+      ? new Date(date + "T00:00:00.000Z")
+      : new Date(new Date().toISOString().split("T")[0] + "T00:00:00.000Z");
 
     const where = { userId: req.user.id };
 
@@ -87,13 +96,13 @@ router.get("/", async (req, res) => {
       },
     });
 
-    // Add days overdue for OVERDUE tasks
+    // Add days overdue for OVERDUE tasks using user's date
     const enrichedTasks = tasks.map((task) => ({
       ...task,
       daysOverdue:
         task.status === "OVERDUE" && task.dueDate
           ? Math.floor(
-              (new Date() - new Date(task.dueDate)) / (1000 * 60 * 60 * 24),
+              (userToday - new Date(task.dueDate)) / (1000 * 60 * 60 * 24),
             )
           : null,
     }));
@@ -108,9 +117,15 @@ router.get("/", async (req, res) => {
 // Create task
 router.post("/", async (req, res) => {
   try {
-    const { title, description, goalId, priority, estimatedMinutes, dueDate } =
-      req.body;
-
+    const {
+      title,
+      description,
+      goalId,
+      priority,
+      estimatedMinutes,
+      dueDate,
+      date,
+    } = req.body;
     if (goalId) {
       const goal = await prisma.goal.findFirst({
         where: { id: goalId, userId: req.user.id },
@@ -138,11 +153,31 @@ router.post("/", async (req, res) => {
       taskColor = goal?.color || null;
     }
 
-    const taskDueDate = dueDate ? new Date(dueDate) : null;
+    // ✅ FIXED: Handle dueDate properly
+    let taskDueDate = null;
+    if (dueDate) {
+      if (dueDate.includes("T")) {
+        // Full datetime: "2026-06-07T14:30:00"
+        taskDueDate = new Date(dueDate);
+      } else {
+        // Date only: "2026-06-07"
+        taskDueDate = new Date(dueDate + "T00:00:00.000Z");
+      }
+
+      // Validate the date
+      if (isNaN(taskDueDate.getTime())) {
+        return res.status(400).json({ message: "Invalid due date format" });
+      }
+    }
+
+    // ✅ FIXED: Use user's date for "today" comparison
+    const userToday = date
+      ? new Date(date + "T00:00:00.000Z")
+      : new Date(new Date().toISOString().split("T")[0] + "T00:00:00.000Z");
 
     // Determine initial status
     let initialStatus = "TODO";
-    if (taskDueDate && taskDueDate < new Date()) {
+    if (taskDueDate && taskDueDate < userToday) {
       initialStatus = "OVERDUE";
     }
 
@@ -154,7 +189,7 @@ router.post("/", async (req, res) => {
         description,
         priority: priority || "MEDIUM",
         color: taskColor,
-        estimatedMinutes,
+        estimatedMinutes: estimatedMinutes || null, // Convert undefined to null
         dueDate: taskDueDate,
         status: initialStatus,
       },
@@ -178,38 +213,59 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ message: "Task not found" });
     }
 
-    const updateData = { ...req.body };
+    // ✅ Extract known fields, keep 'date' separate (not a DB field)
+    const {
+      date, // ← Extract but don't pass to Prisma
+      dueDate,
+      completedAt,
+      status,
+      ...rest
+    } = req.body;
 
-    // Convert date strings
-    if (updateData.dueDate === null || updateData.dueDate === "") {
+    const updateData = { ...rest };
+
+    // ✅ Handle dueDate separately - only update if provided
+    if (dueDate === null || dueDate === "") {
       updateData.dueDate = null;
-    } else if (updateData.dueDate && typeof updateData.dueDate === "string") {
-      updateData.dueDate = new Date(updateData.dueDate);
+    } else if (dueDate !== undefined) {
+      // Only process if explicitly provided
+      if (typeof dueDate === "string") {
+        if (dueDate.includes("T")) {
+          updateData.dueDate = new Date(dueDate);
+        } else {
+          updateData.dueDate = new Date(dueDate + "T00:00:00.000Z");
+        }
+        // Validate
+        if (isNaN(updateData.dueDate.getTime())) {
+          return res.status(400).json({ message: "Invalid due date format" });
+        }
+      }
     }
+    // If dueDate is undefined, it won't be in updateData → doesn't change
 
-    if (updateData.completedAt) {
-      updateData.completedAt = new Date(updateData.completedAt);
+    // Handle completedAt
+    if (completedAt) {
+      updateData.completedAt = new Date(completedAt);
     }
 
     // Handle status changes
-    if (updateData.status) {
-      if (updateData.status === "COMPLETED") {
+    if (status) {
+      if (status === "COMPLETED") {
         updateData.completedAt = new Date();
         updateData.failedAt = null;
         updateData.failureReason = null;
-      } else if (updateData.status === "FAILED") {
+      } else if (status === "FAILED") {
         updateData.failedAt = new Date();
         updateData.completedAt = null;
-      } else if (
-        ["TODO", "IN_PROGRESS", "OVERDUE"].includes(updateData.status)
-      ) {
+      } else if (["TODO", "IN_PROGRESS", "OVERDUE"].includes(status)) {
         updateData.completedAt = null;
         updateData.failedAt = null;
         updateData.failureReason = null;
       }
+      updateData.status = status;
     }
 
-    // Remove undefined values
+    // ✅ Remove undefined values (so Prisma doesn't try to set them)
     Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) {
         delete updateData[key];
@@ -221,8 +277,8 @@ router.put("/:id", async (req, res) => {
       data: updateData,
     });
 
-    // Refresh status
-    await refreshTaskStatus(req.params.id);
+    // Refresh status using user's date
+    await refreshTaskStatus(req.params.id, date);
 
     // Return refreshed task
     const refreshedTask = await prisma.task.findUnique({

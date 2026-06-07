@@ -377,16 +377,18 @@ async function updateHabitStats(habitId) {
   });
 
   let streak = 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+
+  // Use UTC midnight for consistency
+  const now = new Date();
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   for (let i = 0; i < logs.length; i++) {
     const expectedDate = new Date(today);
-    expectedDate.setDate(expectedDate.getDate() - i);
-    expectedDate.setHours(0, 0, 0, 0);
+    expectedDate.setUTCDate(expectedDate.getUTCDate() - i);
 
     const logDate = new Date(logs[i].date);
-    logDate.setHours(0, 0, 0, 0);
 
     if (logDate.getTime() === expectedDate.getTime()) {
       streak++;
@@ -419,21 +421,31 @@ async function updateHabitStats(habitId) {
 
 // @desc    Unlog habit completion (remove today's log)
 // @route   DELETE /api/habits/:id/log
+// @desc    Unlog habit completion (remove today's log)
+// @route   DELETE /api/habits/:id/log
 const unlogHabit = async (req, res) => {
   try {
     const habitId = req.params.id;
+    const { date } = req.query; // ← Accept date from frontend
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Use the date string from frontend (e.g., "2026-06-06")
+    let targetDate;
+    if (date) {
+      targetDate = new Date(date + "T00:00:00.000Z");
+    } else {
+      const now = new Date();
+      const todayStr = now.toISOString().split("T")[0];
+      targetDate = new Date(todayStr + "T00:00:00.000Z");
+    }
 
     const existingLog = await prisma.habitLog.findUnique({
       where: {
-        habitId_date: { habitId, date: today },
+        habitId_date: { habitId, date: targetDate },
       },
     });
 
     if (!existingLog) {
-      return res.status(404).json({ message: "No log found for today" });
+      return res.status(404).json({ message: "No log found for this date" });
     }
 
     await prisma.habitLog.delete({
