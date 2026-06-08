@@ -113,37 +113,6 @@ async function checkOverdueGoals(userId) {
     tasksMarkedOverdue++;
   }
 
-  // ============================================================================
-  // TASKS: Fail OVERDUE tasks past the auto-fail period
-  // ============================================================================
-
-  const tasksToFail = await prisma.task.findMany({
-    where: {
-      userId,
-      status: "OVERDUE",
-      dueDate: {
-        not: null,
-        lt: new Date(now - 30 * 24 * 60 * 60 * 1000),
-      },
-    },
-  });
-
-  let tasksFailed = 0;
-  for (const task of tasksToFail) {
-    const daysOverdue = Math.floor(
-      (now - task.dueDate) / (24 * 60 * 60 * 1000),
-    );
-    await prisma.task.update({
-      where: { id: task.id },
-      data: {
-        status: "FAILED",
-        failedAt: now,
-        failureReason: `Overdue for ${daysOverdue} days (auto-failed after 30 days)`,
-      },
-    });
-    tasksFailed++;
-  }
-
   // Log results
   if (goalsMarkedOverdue || goalsFailed || tasksMarkedOverdue || tasksFailed) {
     console.log(`📋 Deadline check for user ${userId}:`, {
