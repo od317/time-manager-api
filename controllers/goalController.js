@@ -54,11 +54,37 @@ const refreshGoalStatus = async (goalId) => {
   }
 };
 
+async function cascadeColor(parentId, color) {
+  // Get direct children
+  const children = await prisma.goal.findMany({
+    where: { parentId },
+    select: { id: true },
+  });
+
+  if (children.length === 0) return;
+
+  // Update all direct children's color
+  await prisma.goal.updateMany({
+    where: { parentId },
+    data: { color },
+  });
+
+  // Also update their tasks' colors
+  for (const child of children) {
+    await prisma.task.updateMany({
+      where: { goalId: child.id },
+      data: { color },
+    });
+  }
+
+  // Recursively update deeper descendants
+  for (const child of children) {
+    await cascadeColor(child.id, color);
+  }
+}
+
 // @desc    Get all goals for user (with hierarchy)
 // @route   GET /api/goals
-// backend/controllers/goalController.js
-
-// backend/controllers/goalController.js
 
 const getGoals = async (req, res) => {
   try {
@@ -415,7 +441,73 @@ const updateGoal = async (req, res) => {
       return res.status(404).json({ message: "Goal not found" });
     }
 
-    // If trying to set to ACTIVE and has a completed parent, block it
+    const now = new Date();
+
+    // ==========================================================================
+    // RULE: FAILED goals are locked (only archive allowed)
+    // ==========================================================================
+    if (existingGoal.status === "FAILED") {
+      const allowedFields = ["status"];
+      const attemptedFields = Object.keys(req.body).filter(
+        (k) => k !== "status",
+      );
+
+      if (req.body.status === "ARCHIVED") {
+        // Allow archiving
+      } else if (
+        attemptedFields.length > 0 ||
+        (req.body.status && req.body.status !== "FAILED")
+      ) {
+        return res.status(400).json({
+          message:
+            "Failed goals cannot be edited. Archive it or duplicate it to start fresh.",
+        });
+      }
+    }
+
+    // ==========================================================================
+    // RULE: OVERDUE goals - only cosmetic edits + complete/fail allowed
+    // ==========================================================================
+    if (existingGoal.status === "OVERDUE") {
+      const blockedFields = [
+        "endDate",
+        "targetValue",
+        "targetMetric",
+        "unit",
+        "progress",
+        "currentValue",
+      ];
+      const attemptedBlocked = Object.keys(req.body).filter((k) =>
+        blockedFields.includes(k),
+      );
+
+      if (
+        attemptedBlocked.length > 0 &&
+        req.body.status !== "COMPLETED" &&
+        req.body.status !== "FAILED"
+      ) {
+        return res.status(400).json({
+          message: `Cannot edit ${attemptedBlocked.join(", ")} on an overdue goal. Mark it as completed, failed, or extend the due date first.`,
+        });
+      }
+
+      // Allow extending due date to move back to ACTIVE
+      if (req.body.endDate) {
+        const newEndDate = new Date(req.body.endDate);
+        if (newEndDate >= now) {
+          // User is extending the deadline - allow it
+          // Status will be changed to ACTIVE by refreshGoalStatus
+        } else {
+          return res.status(400).json({
+            message: "Cannot set end date in the past on an overdue goal.",
+          });
+        }
+      }
+    }
+
+    // ==========================================================================
+    // RULE: Cannot re-activate if parent is completed
+    // ==========================================================================
     if (
       (req.body.status === "ACTIVE" || req.body.status === "OVERDUE") &&
       existingGoal.parentId
@@ -432,7 +524,9 @@ const updateGoal = async (req, res) => {
       }
     }
 
-    // If trying to complete, check sub-goals and tasks
+    // ==========================================================================
+    // RULE: Completing a goal requires all sub-goals and tasks done
+    // ==========================================================================
     if (req.body.status === "COMPLETED") {
       const activeSubGoals = await prisma.goal.count({
         where: {
@@ -461,11 +555,9 @@ const updateGoal = async (req, res) => {
       }
     }
 
-    // Allow completing OVERDUE goals
-    if (req.body.status === "COMPLETED" && existingGoal.status === "OVERDUE") {
-      // This is fine - completing an overdue goal
-    }
-
+    // ==========================================================================
+    // BUILD UPDATE DATA
+    // ==========================================================================
     const {
       title,
       description,
@@ -485,7 +577,6 @@ const updateGoal = async (req, res) => {
       progress,
     } = req.body;
 
-    // Build update data
     const updateData = {
       title,
       description,
@@ -507,9 +598,7 @@ const updateGoal = async (req, res) => {
 
     // Remove undefined values
     Object.keys(updateData).forEach((key) => {
-      if (updateData[key] === undefined) {
-        delete updateData[key];
-      }
+      if (updateData[key] === undefined) delete updateData[key];
     });
 
     // Handle status changes
@@ -520,13 +609,22 @@ const updateGoal = async (req, res) => {
         updateData.completedAt = new Date();
         updateData.failedAt = null;
         updateData.failureReason = null;
+        // If completing an overdue goal, set progress to 100%
+        if (existingGoal.status === "OVERDUE") {
+          updateData.progress = 100;
+          updateData.currentValue =
+            existingGoal.targetValue || updateData.currentValue;
+        }
       } else if (status === "FAILED") {
         updateData.failedAt = new Date();
         updateData.completedAt = null;
+        updateData.failureReason = req.body.failureReason || "Manually failed";
       } else if (status === "ACTIVE" || status === "OVERDUE") {
         updateData.completedAt = null;
         updateData.failedAt = null;
         updateData.failureReason = null;
+      } else if (status === "ARCHIVED") {
+        updateData.archivedAt = new Date();
       }
     }
 
@@ -535,10 +633,13 @@ const updateGoal = async (req, res) => {
       data: updateData,
     });
 
+    if (req.body.color && req.body.color !== existingGoal.color) {
+      await cascadeColor(req.params.id, req.body.color);
+    }
+
     // Refresh status after update
     await refreshGoalStatus(req.params.id);
 
-    // Fetch the refreshed goal
     const refreshedGoal = await prisma.goal.findUnique({
       where: { id: req.params.id },
     });
