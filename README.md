@@ -1,8 +1,8 @@
-# ⏱️ TimeFlow - Backend API
+# ⏱ TimeFlow - Backend API
 
 REST API for the TimeFlow time management application. Built with Express.js, Prisma ORM, and PostgreSQL.
 
-## 🚀 Tech Stack
+## Tech Stack
 
 | Category       | Technology                              |
 | -------------- | --------------------------------------- |
@@ -14,7 +14,7 @@ REST API for the TimeFlow time management application. Built with Express.js, Pr
 | **AI**         | OpenRouter (multi-model fallback)       |
 | **Validation** | Manual (with Prisma schema constraints) |
 
-## 📦 Installation
+## Installation
 
 ### Prerequisites
 
@@ -73,7 +73,7 @@ Server runs on `http://localhost:5000`
 
 ---
 
-## 📊 Database Models
+##  Database Models
 
 ### User
 
@@ -127,7 +127,7 @@ Server runs on `http://localhost:5000`
 
 ---
 
-## 🔄 Status Flows
+##  Status Flows
 
 ### Goal Status Flow
 
@@ -262,7 +262,7 @@ Returns:
 
 ---
 
-## 🔐 Authentication
+##  Authentication
 
 - JWT-based authentication
 - Tokens stored in httpOnly cookies or Authorization header
@@ -272,7 +272,7 @@ Returns:
 
 ---
 
-## 📅 Date Handling
+##  Date Handling
 
 All dates are normalized to **UTC midnight** (`T00:00:00.000Z`) for consistency:
 
@@ -284,7 +284,7 @@ All dates are normalized to **UTC midnight** (`T00:00:00.000Z`) for consistency:
 
 ---
 
-## 🎨 Goal Update Rules
+##  Goal Update Rules
 
 | Status  | Edit Details | Edit Due Date    | Edit Target | Complete | Fail         |
 | ------- | ------------ | ---------------- | ----------- | -------- | ------------ |
@@ -298,7 +298,7 @@ All dates are normalized to **UTC midnight** (`T00:00:00.000Z`) for consistency:
 
 ---
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 backend/
@@ -334,7 +334,7 @@ backend/
 
 ---
 
-## 🗄️ Database Schema Highlights
+##  Database Schema Highlights
 
 ### Goal Hierarchy
 
@@ -380,7 +380,7 @@ All time durations returned in multiple formats:
 
 ---
 
-## 🤖 AI Integration
+##  AI Integration
 
 - **Provider**: OpenRouter with multi-model fallback
 - **Free tier**: Uses `openrouter/free` auto-router + specific free models
@@ -392,7 +392,7 @@ All time durations returned in multiple formats:
 
 ---
 
-## 🔧 Scripts
+##  Scripts
 
 | Script                   | Description                           |
 | ------------------------ | ------------------------------------- |
@@ -405,7 +405,7 @@ All time durations returned in multiple formats:
 
 ---
 
-## 🚀 Deployment
+##  Deployment
 
 ### Render (Free Tier)
 

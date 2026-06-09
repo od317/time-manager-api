@@ -4,16 +4,17 @@ const router = express.Router();
 const prisma = require("../utils/prisma");
 const auth = require("../middleware/auth");
 
-/**
- * POST /api/seed/all
- * Creates comprehensive test data covering all edge cases
- * WARNING: This deletes ALL existing data for the test user!
- */
+function utcMidnight(date) {
+  const d = new Date(date);
+  return new Date(
+    Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()),
+  );
+}
+
 router.post("/all", auth, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Clean existing data for this user
     await prisma.$transaction([
       prisma.taskCheckIn.deleteMany({ where: { task: { userId } } }),
       prisma.timeEntry.deleteMany({ where: { userId } }),
@@ -24,27 +25,25 @@ router.post("/all", auth, async (req, res) => {
     ]);
 
     const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today - 86400000);
-    const tomorrow = new Date(today.getTime() + 86400000);
-    const dayAfterTomorrow = new Date(today.getTime() + 172800000);
-    const nextWeek = new Date(today.getTime() + 7 * 86400000);
-    const lastWeek = new Date(today.getTime() - 7 * 86400000);
-    const lastMonth = new Date(today.getTime() - 30 * 86400000);
-    const nextMonth = new Date(today.getTime() + 30 * 86400000);
-    const twoDaysAgo = new Date(today.getTime() - 172800000);
-    const threeDaysAgo = new Date(today.getTime() - 259200000);
-    const fourDaysAgo = new Date(today.getTime() - 345600000);
+    const today = utcMidnight(now);
+    const yesterday = utcMidnight(new Date(today.getTime() - 86400000));
+    const tomorrow = utcMidnight(new Date(today.getTime() + 86400000));
+    const dayAfterTomorrow = utcMidnight(new Date(today.getTime() + 172800000));
+    const nextWeek = utcMidnight(new Date(today.getTime() + 7 * 86400000));
+    const lastWeek = utcMidnight(new Date(today.getTime() - 7 * 86400000));
+    const lastMonth = utcMidnight(new Date(today.getTime() - 30 * 86400000));
+    const nextMonth = utcMidnight(new Date(today.getTime() + 30 * 86400000));
+    const twoDaysAgo = utcMidnight(new Date(today.getTime() - 172800000));
+    const threeDaysAgo = utcMidnight(new Date(today.getTime() - 259200000));
+    const fourDaysAgo = utcMidnight(new Date(today.getTime() - 345600000));
 
     // ========================================================================
-    // GOALS - Create all goals first
+    // GOALS
     // ========================================================================
-
-    // Create individual goals
     const goal1 = await prisma.goal.create({
       data: {
         userId,
-        title: "🏃 Running Distance Goal",
+        title: "Running Distance Goal",
         description:
           "Active goal ending in future, quantity type, 50% progress",
         goalType: "quantity",
@@ -58,15 +57,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "HARD",
         progress: 50,
         color: "#4CAF50",
-        icon: "🏃",
         sortOrder: 1,
       },
     });
-
     const goal2 = await prisma.goal.create({
       data: {
         userId,
-        title: "📚 Read 12 Books",
+        title: "Read 12 Books",
         description: "Completed goal, ended yesterday, achieved target",
         goalType: "quantity",
         status: "COMPLETED",
@@ -80,15 +77,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "HARD",
         progress: 100,
         color: "#2196F3",
-        icon: "📚",
         sortOrder: 2,
       },
     });
-
     const goal3 = await prisma.goal.create({
       data: {
         userId,
-        title: "💪 Gym Sessions",
+        title: "Gym Sessions",
         description: "Failed goal, past deadline, only 40% done",
         goalType: "quantity",
         status: "FAILED",
@@ -104,16 +99,14 @@ router.post("/all", auth, async (req, res) => {
         autoFail: true,
         progress: 40,
         color: "#F44336",
-        icon: "💪",
         sortOrder: 3,
       },
     });
-
     const goal4 = await prisma.goal.create({
       data: {
         userId,
-        title: "📝 Journal This Week",
-        description: "Active goal ending today, 70% complete - tight deadline!",
+        title: "Journal This Week",
+        description: "Active goal ending today, 70% complete",
         goalType: "quantity",
         status: "ACTIVE",
         priority: "HIGH",
@@ -125,15 +118,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "HARD",
         progress: 71,
         color: "#FF9800",
-        icon: "📝",
         sortOrder: 4,
       },
     });
-
     const goal5 = await prisma.goal.create({
       data: {
         userId,
-        title: "🧘 Daily Meditation",
+        title: "Daily Meditation",
         description: "Ongoing goal with no end date, time-based",
         goalType: "time",
         status: "ACTIVE",
@@ -146,15 +137,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "SOFT",
         progress: 20,
         color: "#9C27B0",
-        icon: "🧘",
         sortOrder: 5,
       },
     });
-
     const goal6 = await prisma.goal.create({
       data: {
         userId,
-        title: "💧 Water Intake",
+        title: "Water Intake",
         description: "Overachieved! Completed but tracking continues",
         goalType: "quantity",
         status: "COMPLETED",
@@ -168,15 +157,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "SOFT",
         progress: 150,
         color: "#00BCD4",
-        icon: "💧",
         sortOrder: 6,
       },
     });
-
     const goal7 = await prisma.goal.create({
       data: {
         userId,
-        title: "🎸 Learn Guitar",
+        title: "Learn Guitar",
         description: "Archived - lost interest",
         goalType: "project",
         status: "ARCHIVED",
@@ -190,15 +177,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "SOFT",
         progress: 15,
         color: "#795548",
-        icon: "🎸",
         sortOrder: 7,
       },
     });
-
     const goal8 = await prisma.goal.create({
       data: {
         userId,
-        title: "🎨 Paint Portfolio",
+        title: "Paint Portfolio",
         description: "OVERDUE - Past deadline but can still complete",
         goalType: "project",
         status: "OVERDUE",
@@ -210,15 +195,13 @@ router.post("/all", auth, async (req, res) => {
         endDate: yesterday,
         progress: 80,
         color: "#FF9800",
-        icon: "⚠️",
         sortOrder: 8,
       },
     });
-
     const goal9 = await prisma.goal.create({
       data: {
         userId,
-        title: "🌱 New Habit Building",
+        title: "New Habit Building",
         description: "Just started, 0% progress, future deadline",
         goalType: "quantity",
         status: "ACTIVE",
@@ -231,15 +214,13 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "HARD",
         progress: 0,
         color: "#8BC34A",
-        icon: "🌱",
         sortOrder: 9,
       },
     });
-
     const goal10 = await prisma.goal.create({
       data: {
         userId,
-        title: "🏋️ Weekly Workout Goal",
+        title: "Weekly Workout Goal",
         description: "Recurring weekly fitness target",
         goalType: "quantity",
         status: "ACTIVE",
@@ -254,12 +235,10 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "SOFT",
         progress: 33,
         color: "#FF5722",
-        icon: "🏋️",
         sortOrder: 10,
       },
     });
 
-    // Store all goals in an array for later reference
     const goals = [
       goal1,
       goal2,
@@ -273,11 +252,10 @@ router.post("/all", auth, async (req, res) => {
       goal10,
     ];
 
-    // Create GOAL HIERARCHY (parent-child relationships)
     const parentGoal = await prisma.goal.create({
       data: {
         userId,
-        title: "🏆 Health & Fitness Master Goal",
+        title: "Health & Fitness Master Goal",
         description: "Parent goal containing sub-goals",
         goalType: "project",
         status: "ACTIVE",
@@ -290,16 +268,14 @@ router.post("/all", auth, async (req, res) => {
         deadlineType: "SOFT",
         progress: 33,
         color: "#FFC107",
-        icon: "🏆",
         sortOrder: 0,
       },
     });
-
     const childGoal1 = await prisma.goal.create({
       data: {
         userId,
         parentId: parentGoal.id,
-        title: "💪 Strength Training",
+        title: "Strength Training",
         description: "Child goal 1 of Health Master",
         goalType: "quantity",
         status: "ACTIVE",
@@ -311,16 +287,14 @@ router.post("/all", auth, async (req, res) => {
         endDate: nextMonth,
         progress: 40,
         color: "#FF9800",
-        icon: "💪",
         sortOrder: 1,
       },
     });
-
     const childGoal2 = await prisma.goal.create({
       data: {
         userId,
         parentId: parentGoal.id,
-        title: "🥗 Nutrition Tracking",
+        title: "Nutrition Tracking",
         description: "Child goal 2 of Health Master",
         goalType: "quantity",
         status: "ACTIVE",
@@ -332,18 +306,15 @@ router.post("/all", auth, async (req, res) => {
         endDate: nextMonth,
         progress: 72,
         color: "#4CAF50",
-        icon: "🥗",
         sortOrder: 2,
       },
     });
-
-    // Deep nested goal (3 levels)
-    const deepNestedGoal = await prisma.goal.create({
+    await prisma.goal.create({
       data: {
         userId,
         parentId: childGoal1.id,
-        title: "🏋️ Deadlift Progress",
-        description: "Nested 3 levels deep! Sub-goal of Strength Training",
+        title: "Deadlift Progress",
+        description: "Nested 3 levels deep",
         goalType: "quantity",
         status: "ACTIVE",
         priority: "HIGH",
@@ -354,17 +325,14 @@ router.post("/all", auth, async (req, res) => {
         endDate: nextMonth,
         progress: 75,
         color: "#F44336",
-        icon: "🏋️",
         sortOrder: 1,
       },
     });
 
     // ========================================================================
-    // TASKS - Now goals array is fully initialized
+    // TASKS
     // ========================================================================
-
     const tasks = await Promise.all([
-      // 1. TODO task - future due date (linked to goal1)
       prisma.task.create({
         data: {
           userId,
@@ -379,14 +347,12 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 1,
         },
       }),
-
-      // 2. IN_PROGRESS task - due today (linked to goal1)
       prisma.task.create({
         data: {
           userId,
           goalId: goal1.id,
           title: "Buy running shoes",
-          description: "In progress, due today - needs completion!",
+          description: "In progress, due today",
           status: "IN_PROGRESS",
           priority: "HIGH",
           currentValue: 0.5,
@@ -397,8 +363,6 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 2,
         },
       }),
-
-      // 3. COMPLETED task (linked to goal2)
       prisma.task.create({
         data: {
           userId,
@@ -416,18 +380,16 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 3,
         },
       }),
-
-      // 4. FAILED task (linked to goal3)
       prisma.task.create({
         data: {
           userId,
           goalId: goal3.id,
           title: "Leg day workout",
-          description: "Failed! Due 5 days ago, never completed",
+          description: "Failed! Due 5 days ago",
           status: "FAILED",
           priority: "HIGH",
-          dueDate: new Date(today - 5 * 86400000),
-          failedAt: new Date(today - 5 * 86400000),
+          dueDate: utcMidnight(new Date(today.getTime() - 5 * 86400000)),
+          failedAt: utcMidnight(new Date(today.getTime() - 5 * 86400000)),
           failureReason: "Missed deadline",
           estimatedMinutes: 90,
           autoFail: true,
@@ -437,14 +399,12 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 4,
         },
       }),
-
-      // 5. OVERDUE task within grace period (linked to goal4)
       prisma.task.create({
         data: {
           userId,
           goalId: goal4.id,
           title: "Evening journal entry",
-          description: "Due yesterday but within 24h grace period",
+          description: "Due yesterday, within grace period",
           status: "OVERDUE",
           priority: "HIGH",
           dueDate: yesterday,
@@ -456,8 +416,6 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 5,
         },
       }),
-
-      // 6. Recurring task (linked to goal5)
       prisma.task.create({
         data: {
           userId,
@@ -476,13 +434,11 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 6,
         },
       }),
-
-      // 7. Standalone task (no goal)
       prisma.task.create({
         data: {
           userId,
-          title: "📞 Call dentist",
-          description: "No goal association, standalone task",
+          title: "Call dentist",
+          description: "Standalone task, no goal",
           status: "TODO",
           priority: "MEDIUM",
           dueDate: dayAfterTomorrow,
@@ -493,12 +449,10 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 7,
         },
       }),
-
-      // 8. Low priority task - no due date
       prisma.task.create({
         data: {
           userId,
-          title: "🎵 Create workout playlist",
+          title: "Create workout playlist",
           description: "Low priority, no deadline",
           status: "TODO",
           priority: "LOW",
@@ -510,14 +464,12 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 8,
         },
       }),
-
-      // 9. OVERDUE task - overdue but not failed (grace period extended)
       prisma.task.create({
         data: {
           userId,
           goalId: goal1.id,
           title: "Stretch routine",
-          description: "OVERDUE by 1 day but grace period extended to 72h",
+          description: "OVERDUE but grace period extended",
           status: "OVERDUE",
           priority: "MEDIUM",
           dueDate: yesterday,
@@ -530,8 +482,6 @@ router.post("/all", auth, async (req, res) => {
           sortOrder: 9,
         },
       }),
-
-      // 10. Task with quantity tracking (linked to goal9)
       prisma.task.create({
         data: {
           userId,
@@ -551,11 +501,10 @@ router.post("/all", auth, async (req, res) => {
       }),
     ]);
 
-    // Add task check-ins
     await Promise.all([
       prisma.taskCheckIn.create({
         data: {
-          taskId: tasks[9].id, // Read 10 pages
+          taskId: tasks[9].id,
           value: 2,
           note: "Morning reading session",
           checkedAt: new Date(today.getTime() - 4 * 3600000),
@@ -563,7 +512,7 @@ router.post("/all", auth, async (req, res) => {
       }),
       prisma.taskCheckIn.create({
         data: {
-          taskId: tasks[9].id, // Read 10 pages
+          taskId: tasks[9].id,
           value: 2,
           note: "Afternoon reading",
           checkedAt: new Date(today.getTime() - 1 * 3600000),
@@ -571,7 +520,7 @@ router.post("/all", auth, async (req, res) => {
       }),
       prisma.taskCheckIn.create({
         data: {
-          taskId: tasks[4].id, // Journal entry
+          taskId: tasks[4].id,
           value: 0,
           note: "Started but got interrupted",
           checkedAt: yesterday,
@@ -582,13 +531,11 @@ router.post("/all", auth, async (req, res) => {
     // ========================================================================
     // HABITS
     // ========================================================================
-
     const habits = await Promise.all([
-      // 1. DAILY habit - Active with strong streak
       prisma.habit.create({
         data: {
           userId,
-          title: "💧 Drink 8 glasses of water",
+          title: "Drink 8 glasses of water",
           description: "Daily habit, 15-day streak, completed today",
           frequencyType: "DAILY",
           timesPerDay: 8,
@@ -603,17 +550,14 @@ router.post("/all", auth, async (req, res) => {
           maxRolloverDays: 2,
           currentRollovers: 1,
           color: "#00BCD4",
-          icon: "💧",
           sortOrder: 1,
         },
       }),
-
-      // 2. DAILY habit - Missed today (broken streak)
       prisma.habit.create({
         data: {
           userId,
-          title: "🏃 Morning run",
-          description: "Daily habit, missed today - streak broken!",
+          title: "Morning run",
+          description: "Daily habit, missed today - streak broken",
           frequencyType: "DAILY",
           timesPerDay: 1,
           status: "ACTIVE",
@@ -625,18 +569,14 @@ router.post("/all", auth, async (req, res) => {
           currentRollovers: 0,
           lastCompletedAt: yesterday,
           color: "#FF9800",
-          icon: "🏃",
           sortOrder: 2,
         },
       }),
-
-      // 3. WEEKLY habit - Completed this week
       prisma.habit.create({
         data: {
           userId,
-          title: "🧹 House cleaning",
-          description:
-            "Weekly habit, scheduled Mon/Wed/Sat, completed for this week",
+          title: "House cleaning",
+          description: "Weekly habit, Mon/Wed/Sat",
           frequencyType: "WEEKLY",
           frequencyDays: [1, 3, 6],
           timesPerDay: 1,
@@ -646,17 +586,14 @@ router.post("/all", auth, async (req, res) => {
           totalCompletions: 52,
           allowRollover: false,
           color: "#795548",
-          icon: "🧹",
           sortOrder: 3,
         },
       }),
-
-      // 4. WEEKLY habit - Missed this week
       prisma.habit.create({
         data: {
           userId,
-          title: "📖 Book club reading",
-          description: "Weekly habit on Sundays, missed this week",
+          title: "Book club reading",
+          description: "Weekly habit on Sundays, missed",
           frequencyType: "WEEKLY",
           frequencyDays: [0],
           timesPerDay: 1,
@@ -668,17 +605,14 @@ router.post("/all", auth, async (req, res) => {
           maxRolloverDays: 3,
           currentRollovers: 2,
           color: "#9C27B0",
-          icon: "📖",
           sortOrder: 4,
         },
       }),
-
-      // 5. CUSTOM frequency habit
       prisma.habit.create({
         data: {
           userId,
-          title: "🏋️ Gym workout",
-          description: "Custom: 4x per week, specific days",
+          title: "Gym workout",
+          description: "Custom: 4x per week",
           frequencyType: "CUSTOM",
           frequencyDays: [1, 2, 4, 5],
           timesPerDay: 1,
@@ -688,16 +622,13 @@ router.post("/all", auth, async (req, res) => {
           totalCompletions: 40,
           trackAmount: false,
           color: "#F44336",
-          icon: "🏋️",
           sortOrder: 5,
         },
       }),
-
-      // 6. PAUSED habit
       prisma.habit.create({
         data: {
           userId,
-          title: "🎸 Guitar practice",
+          title: "Guitar practice",
           description: "Paused while traveling",
           frequencyType: "DAILY",
           timesPerDay: 1,
@@ -707,16 +638,13 @@ router.post("/all", auth, async (req, res) => {
           longestStreak: 14,
           totalCompletions: 30,
           color: "#607D8B",
-          icon: "🎸",
           sortOrder: 6,
         },
       }),
-
-      // 7. ARCHIVED habit
       prisma.habit.create({
         data: {
           userId,
-          title: "📺 No TV during weekdays",
+          title: "No TV during weekdays",
           description: "Archived - no longer relevant",
           frequencyType: "DAILY",
           timesPerDay: 1,
@@ -726,17 +654,14 @@ router.post("/all", auth, async (req, res) => {
           longestStreak: 45,
           totalCompletions: 90,
           color: "#9E9E9E",
-          icon: "📺",
           sortOrder: 7,
         },
       }),
-
-      // 8. New habit (no completions yet)
       prisma.habit.create({
         data: {
           userId,
-          title: "🌿 Evening skincare routine",
-          description: "Brand new habit, starting today",
+          title: "Evening skincare routine",
+          description: "Brand new habit",
           frequencyType: "DAILY",
           timesPerDay: 1,
           status: "ACTIVE",
@@ -747,17 +672,14 @@ router.post("/all", auth, async (req, res) => {
           trackAmount: true,
           unit: "steps",
           color: "#E91E63",
-          icon: "🌿",
           sortOrder: 8,
         },
       }),
-
-      // 9. Multiple times per day habit
       prisma.habit.create({
         data: {
           userId,
-          title: "🧘 Stretch breaks",
-          description: "3 times per day, good for office workers",
+          title: "Stretch breaks",
+          description: "3 times per day",
           frequencyType: "DAILY",
           timesPerDay: 3,
           trackAmount: false,
@@ -766,17 +688,14 @@ router.post("/all", auth, async (req, res) => {
           longestStreak: 15,
           totalCompletions: 45,
           color: "#4CAF50",
-          icon: "🧘",
           sortOrder: 9,
         },
       }),
-
-      // 10. Habit with rollovers maxed out
       prisma.habit.create({
         data: {
           userId,
-          title: "📝 Gratitude journal",
-          description: "Daily, max rollovers used (2/2), must complete today",
+          title: "Gratitude journal",
+          description: "Daily, rollovers maxed",
           frequencyType: "DAILY",
           timesPerDay: 1,
           status: "ACTIVE",
@@ -787,32 +706,24 @@ router.post("/all", auth, async (req, res) => {
           maxRolloverDays: 2,
           currentRollovers: 2,
           color: "#FFC107",
-          icon: "📝",
           sortOrder: 10,
         },
       }),
     ]);
 
-    // ========================================================================
-    // HABIT LOGS
-    // ========================================================================
-
-    // Habit 1: Water drinking (15-day streak)
+    // Habit logs
     const waterLogs = [];
     for (let i = 0; i < 15; i++) {
-      const logDate = new Date(today - i * 86400000);
       waterLogs.push({
         habitId: habits[0].id,
-        date: logDate,
+        date: utcMidnight(new Date(today.getTime() - i * 86400000)),
         value: 8,
         unit: "glasses",
         status: "COMPLETED",
-        completedAt: new Date(logDate.getTime() + 20 * 3600000),
+        completedAt: new Date(today.getTime() - i * 86400000 + 20 * 3600000),
       });
     }
     await prisma.habitLog.createMany({ data: waterLogs });
-
-    // Habit 2: Morning run (completed yesterday, missed today)
     await prisma.habitLog.createMany({
       data: [
         {
@@ -830,23 +741,15 @@ router.post("/all", auth, async (req, res) => {
         },
       ],
     });
-
-    // Habit 3: Weekly cleaning
     await prisma.habitLog.create({
       data: {
         habitId: habits[2].id,
-        date: new Date(
-          today.getFullYear(),
-          today.getMonth(),
-          today.getDate() - 2,
-        ),
+        date: utcMidnight(new Date(today.getTime() - 2 * 86400000)),
         value: 1,
         status: "COMPLETED",
         completedAt: new Date(today.getTime() - 2 * 86400000 + 10 * 3600000),
       },
     });
-
-    // Habit 10: Gratitude journal (rollovers)
     await prisma.habitLog.createMany({
       data: [
         {
@@ -884,25 +787,19 @@ router.post("/all", auth, async (req, res) => {
       ],
     });
 
-    // ========================================================================
-    // TIME ENTRIES
-    // ========================================================================
-
+    // Time entries
     await Promise.all([
-      // Running timer (linked to goal1, task2)
       prisma.timeEntry.create({
         data: {
           userId,
           goalId: goal1.id,
           taskId: tasks[1].id,
-          startTime: new Date(now - 25 * 60000),
+          startTime: new Date(now.getTime() - 25 * 60000),
           entryType: "POMODORO",
           status: "RUNNING",
           note: "Shopping for running shoes online",
         },
       }),
-
-      // Completed timer (linked to goal5)
       prisma.timeEntry.create({
         data: {
           userId,
@@ -915,8 +812,6 @@ router.post("/all", auth, async (req, res) => {
           note: "Morning meditation",
         },
       }),
-
-      // Manual entry (linked to goal1)
       prisma.timeEntry.create({
         data: {
           userId,
@@ -929,13 +824,11 @@ router.post("/all", auth, async (req, res) => {
           note: "Forgot to start timer, ran 5km",
         },
       }),
-
-      // Paused timer (linked to goal2)
       prisma.timeEntry.create({
         data: {
           userId,
           goalId: goal2.id,
-          startTime: new Date(now - 60 * 60000),
+          startTime: new Date(now.getTime() - 60 * 60000),
           entryType: "TIMER",
           status: "PAUSED",
           note: "Reading session - taking a break",
@@ -943,89 +836,24 @@ router.post("/all", auth, async (req, res) => {
       }),
     ]);
 
-    // ========================================================================
-    // RESPONSE
-    // ========================================================================
-
     const counts = {
       goals: await prisma.goal.count({ where: { userId } }),
       tasks: await prisma.task.count({ where: { userId } }),
       habits: await prisma.habit.count({ where: { userId } }),
       habitLogs: await prisma.habitLog.count({ where: { habit: { userId } } }),
       timeEntries: await prisma.timeEntry.count({ where: { userId } }),
-      taskCheckIns: await prisma.taskCheckIn.count({
-        where: { task: { userId } },
-      }),
     };
 
     res.json({
-      message: "✅ Seed data created successfully with all edge cases!",
-      summary: {
-        goals: {
-          total: counts.goals,
-          states: {
-            active: "Future deadline, ending today, no end date, 0% fresh",
-            completed: "100% complete, overachieved (150%)",
-            failed: "Past deadline with failure reason",
-            archived: "Manually archived",
-            overdue: "Past deadline but still completable",
-            hierarchy: "3-level nesting (parent → child → grandchild)",
-          },
-          types: ["quantity", "time", "project"],
-          special: ["recurring (weekly)"],
-        },
-        tasks: {
-          total: counts.tasks,
-          states: {
-            todo: "Future due, no due date",
-            in_progress: "Due today, quantity tracking",
-            completed: "Finished on time",
-            failed: "5 days overdue, auto-failed",
-            overdue: "Past due but within grace period",
-          },
-          features: [
-            "standalone (no goal)",
-            "recurring",
-            "quantity tracking with check-ins",
-          ],
-        },
-        habits: {
-          total: counts.habits,
-          frequency: {
-            daily:
-              "With streak (15 days), missed today (broken), new (0 streak)",
-            weekly: "Completed this week, missed this week",
-            custom: "4x per week specific days",
-          },
-          states: ["active", "paused", "archived"],
-          special: [
-            "multiple times/day (3x)",
-            "rollovers maxed out",
-            "amount tracking",
-          ],
-        },
-        timeEntries: {
-          total: counts.timeEntries,
-          states: [
-            "RUNNING (pomodoro)",
-            "PAUSED",
-            "COMPLETED (timer)",
-            "COMPLETED (manual)",
-          ],
-        },
-      },
-      testUser: {
-        userId,
-        generatedAt: now,
-      },
+      message: "Seed data created successfully",
+      counts,
+      testUser: { userId, generatedAt: now },
     });
   } catch (error) {
     console.error("Seed error:", error);
-    res.status(500).json({
-      message: "Failed to create seed data",
-      error: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-    });
+    res
+      .status(500)
+      .json({ message: "Failed to create seed data", error: error.message });
   }
 });
 
