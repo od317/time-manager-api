@@ -306,6 +306,57 @@ router.post("/start", startTimer);
 // POST /api/time-entries/quick-log
 router.post("/quick-log", quickLog);
 
+// backend/routes/timeEntries.js
+
+// POST /api/time-entries/bulk-log
+router.post("/bulk-log", auth, async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { entries } = req.body; // Array of { taskId, goalId, duration, startTime, note }
+
+    if (!entries || entries.length === 0) {
+      return res.status(400).json({ message: "No entries provided" });
+    }
+
+    const created = await Promise.all(
+      entries.map(async (entry) => {
+        let { goalId, taskId, duration, startTime, note } = entry;
+
+        // Inherit goalId from task
+        if (taskId && !goalId) {
+          const task = await prisma.task.findUnique({
+            where: { id: taskId },
+            select: { goalId: true },
+          });
+          if (task?.goalId) goalId = task.goalId;
+        }
+
+        const start = startTime ? new Date(startTime) : new Date();
+        const end = new Date(start.getTime() + duration * 1000);
+
+        return prisma.timeEntry.create({
+          data: {
+            userId,
+            goalId: goalId || null,
+            taskId: taskId || null,
+            startTime: start,
+            endTime: end,
+            duration,
+            status: "COMPLETED",
+            entryType: "TIMER",
+            note,
+          },
+        });
+      }),
+    );
+
+    res.status(201).json(created);
+  } catch (error) {
+    console.error("Bulk log error:", error);
+    res.status(500).json({ message: "Failed to log entries" });
+  }
+});
+
 // POST /api/time-entries/cleanup
 router.post("/cleanup", async (req, res) => {
   try {

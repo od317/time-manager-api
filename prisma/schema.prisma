@@ -33,6 +33,8 @@ model User {
   settings      UserSettings?
 
   lastLoginAt   DateTime?
+  timerState    TimerState?          // ← ADD THIS
+
 }
 
 // ============================================================================
@@ -302,4 +304,16 @@ model TimeEntry {
   @@index([userId, taskId])
   @@index([userId, habitId])
   @@index([userId, status])
+}
+
+
+
+model TimerState {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  timerMode String   // "SIMPLE" | "POMODORO"
+  state     Json     // Full timer state as JSON
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
