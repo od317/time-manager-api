@@ -5,18 +5,39 @@ const prisma = require("../utils/prisma");
 const getHabits = async (req, res) => {
   try {
     const { status, frequencyType } = req.query;
-
-    const where = { userId: req.user.id };
+    const userId = req.user.id;
+    const where = { userId };
     if (status) where.status = status;
     if (frequencyType) where.frequencyType = frequencyType;
 
+    // ✅ Auto-refresh streaks for all active habits before returning
+    const activeHabits = await prisma.habit.findMany({
+      where: { userId, status: "ACTIVE" },
+      select: { id: true, lastEvaluatedAt: true },
+    });
+
+    const todayStr = new Date().toISOString().split("T")[0];
+    const today = new Date(todayStr + "T00:00:00.000Z");
+
+    for (const habit of activeHabits) {
+      // Only check if not already evaluated today
+      const lastEval = habit.lastEvaluatedAt
+        ? new Date(habit.lastEvaluatedAt).toISOString().split("T")[0]
+        : null;
+
+      if (lastEval !== todayStr) {
+        await updateHabitStats(habit.id);
+      }
+    }
+
+    // Now fetch with updated streaks
     const habits = await prisma.habit.findMany({
       where,
       include: {
         _count: { select: { logs: true } },
         logs: {
           orderBy: { date: "desc" },
-          take: 30, // Last 30 days for history
+          take: 30,
         },
       },
       orderBy: [{ sortOrder: "asc" }, { createdAt: "desc" }],
