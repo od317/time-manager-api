@@ -13,23 +13,21 @@ const getInsights = async (req, res) => {
     const todayStart = new Date(todayStr + "T00:00:00.000Z");
     const tomorrow = new Date(todayStart);
     tomorrow.setUTCDate(tomorrow.getUTCDate() + 1);
-    const dayOfWeek = todayStart.getUTCDay();
 
-    const [goals, tasks, habits] = await Promise.all([
-      prisma.goal.findMany({
-        where: { userId, status: { in: ["ACTIVE", "OVERDUE"] } },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          priority: true,
-          progress: true,
-          endDate: true,
-          goalType: true,
-          tasks: { select: { status: true } },
+    // Only fetch what we absolutely need
+    const [goalCounts, taskCounts, habitStats] = await Promise.all([
+      // Goals: just counts, no details
+      prisma.goal.groupBy({
+        by: ["status"],
+        where: {
+          userId,
+          status: { in: ["ACTIVE", "OVERDUE", "COMPLETED", "FAILED"] },
         },
+        _count: true,
       }),
-      prisma.task.findMany({
+      // Tasks: just counts by status
+      prisma.task.groupBy({
+        by: ["status"],
         where: {
           userId,
           OR: [
@@ -40,102 +38,120 @@ const getInsights = async (req, res) => {
             },
           ],
         },
-        select: {
-          id: true,
-          title: true,
-          status: true,
-          priority: true,
-          dueDate: true,
-          estimatedMinutes: true,
-          goal: { select: { title: true } },
-        },
-        orderBy: [{ priority: "asc" }, { dueDate: "asc" }],
+        _count: true,
       }),
-      prisma.habit.findMany({
+      // Habits: just stats
+      prisma.habit.aggregate({
         where: { userId, status: "ACTIVE" },
-        select: {
-          id: true,
-          title: true,
-          frequencyType: true,
-          frequencyDays: true,
-          currentStreak: true,
-          longestStreak: true,
-          timesPerDay: true,
-        },
+        _max: { currentStreak: true },
+        _avg: { currentStreak: true },
+        _count: true,
       }),
     ]);
 
-    const overdueGoals = goals.filter((g) => g.status === "OVERDUE");
-    const goalsNearDeadline = goals.filter((g) => {
-      if (!g.endDate || g.status !== "ACTIVE") return false;
-      const daysLeft = Math.ceil((new Date(g.endDate) - now) / 86400000);
-      return daysLeft <= 7 && daysLeft >= 0;
-    });
-    const overdueTasks = tasks.filter(
-      (t) => t.status !== "COMPLETED" && t.dueDate && new Date(t.dueDate) < now,
-    );
-    const todayTasks = tasks.filter(
-      (t) =>
-        t.status !== "COMPLETED" &&
-        t.dueDate &&
-        new Date(t.dueDate) >= todayStart &&
-        new Date(t.dueDate) < tomorrow,
-    );
-    const highPriorityTasks = tasks.filter(
-      (t) =>
-        (t.priority === "HIGH" || t.priority === "URGENT") &&
-        t.status !== "COMPLETED",
-    );
-    const completedToday = tasks.filter((t) => t.status === "COMPLETED");
-    const todayHabits = habits.filter((h) => {
-      if (h.frequencyType === "DAILY") return true;
-      return h.frequencyDays?.includes(dayOfWeek);
-    });
-    const habitsAtRisk = habits.filter((h) => h.currentStreak === 0);
-    const bestStreak = habits.reduce(
-      (max, h) => Math.max(max, h.currentStreak),
-      0,
-    );
-    const avgStreak =
-      habits.length > 0
-        ? Math.round(
-            habits.reduce((s, h) => s + h.currentStreak, 0) / habits.length,
-          )
-        : 0;
+    // Quick counts
+    const activeGoals =
+      goalCounts.find((g) => g.status === "ACTIVE")?._count || 0;
+    const overdueGoals =
+      goalCounts.find((g) => g.status === "OVERDUE")?._count || 0;
+    const completedGoals =
+      goalCounts.find((g) => g.status === "COMPLETED")?._count || 0;
+    const failedGoals =
+      goalCounts.find((g) => g.status === "FAILED")?._count || 0;
 
-    // Shorter prompt for insights
-    const prompt = `You are a direct productivity coach. Analyze this data and give straight talk.
+    const activeTasks = taskCounts
+      .filter((t) => ["TODO", "IN_PROGRESS", "OVERDUE"].includes(t.status))
+      .reduce((s, t) => s + t._count, 0);
+    const completedToday =
+      taskCounts.find((t) => t.status === "COMPLETED")?._count || 0;
+
+    const habitsCount = habitStats._count;
+    const bestStreak = habitStats._max?.currentStreak || 0;
+    const avgStreak = Math.round(habitStats._avg?.currentStreak || 0);
+
+    // Fetch only overdue task titles (needed for specific advice)
+    const overdueTaskTitles = await prisma.task.findMany({
+      where: {
+        userId,
+        status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] },
+        dueDate: { lt: now },
+      },
+      select: { title: true },
+      take: 5,
+    });
+
+    // Fetch habits at risk
+    const habitsAtRisk = await prisma.habit.findMany({
+      where: { userId, status: "ACTIVE", currentStreak: 0 },
+      select: { title: true },
+      take: 3,
+    });
+
+    const prompt = `You are a direct productivity coach. Give straight talk based on this data.
 
 TODAY: ${todayStr}
-
-GOALS (${goals.length}): ${goals.map((g) => `"${g.title}"(${Math.round(g.progress)}%,${g.status})`).join(", ")}
-TASKS: ${overdueTasks.length} overdue, ${todayTasks.length} due today, ${completedToday.length} done
-HABITS: ${habits.length} active, avg ${avgStreak}d streak, best ${bestStreak}d
-
-${overdueTasks.length > 0 ? `OVERDUE: ${overdueTasks.map((t) => t.title).join(", ")}` : ""}
+GOALS: ${activeGoals} active, ${overdueGoals} overdue, ${completedGoals} done, ${failedGoals} failed
+TASKS: ${activeTasks} pending, ${completedToday} completed today
+HABITS: ${habitsCount} active, avg ${avgStreak}d streak, best ${bestStreak}d
+${overdueTaskTitles.length > 0 ? `OVERDUE: ${overdueTaskTitles.map((t) => t.title).join(", ")}` : ""}
 ${habitsAtRisk.length > 0 ? `DEAD HABITS: ${habitsAtRisk.map((h) => h.title).join(", ")}` : ""}
 
-Return ONLY JSON:
-{
-  "overall": "honest 2 sentence assessment",
-  "suggestions": ["2-3 specific actions with names"],
-  "warnings": ["1-2 real warnings"],
-  "focusArea": "ONE thing to focus on today",
-  "motivation": "one real sentence"
-}`;
+Return ONLY JSON: {"overall":"honest 2 sentence assessment","suggestions":["2-3 specific actions"],"warnings":["1-2 real warnings"],"focusArea":"ONE thing today","motivation":"one real sentence"}`;
 
-    const aiResponse = await callAI(prompt, 600);
-    if (aiResponse) return res.json(aiResponse);
+    const aiResponse = await callAI(prompt, 400);
+    if (aiResponse) return res.json({ ...aiResponse, aiGenerated: true });
+
+    // AI failed - return fallback with retry flag
+    return res.json({
+      overall: `You have ${activeGoals} active goals and ${activeTasks} pending tasks. ${overdueTaskTitles.length > 0 ? `${overdueTaskTitles.length} overdue tasks need immediate attention.` : "Nothing overdue - keep it up."}`,
+      suggestions:
+        overdueTaskTitles.length > 0
+          ? [
+              `Start with "${overdueTaskTitles[0].title}" - break it into smaller steps`,
+              "Complete just one task today to build momentum",
+              `${habitsAtRisk.length > 0 ? `Restart "${habitsAtRisk[0]?.title}" habit to rebuild your streak` : "Track your time on one task to see where it goes"}`,
+            ]
+          : [
+              "Pick your highest priority goal and make progress today",
+              "Log at least one habit to start a streak",
+            ],
+      warnings: [
+        ...(overdueTaskTitles.length > 0
+          ? [
+              `${overdueTaskTitles.length} overdue tasks are piling up - address the oldest first`,
+            ]
+          : []),
+        ...(habitsAtRisk.length > 0
+          ? [
+              `${habitsAtRisk.length} habits have zero streaks - consistency is key`,
+            ]
+          : []),
+      ].slice(0, 2),
+      focusArea:
+        overdueTaskTitles.length > 0
+          ? `Complete "${overdueTaskTitles[0].title}" today`
+          : "Pick one task and finish it",
+      motivation:
+        activeTasks === 0
+          ? "Clean slate - time to set new goals!"
+          : "Small steps lead to big results. Start now.",
+      aiGenerated: false, // ← Indicates fallback, frontend can show "Retry" button
+    });
     return res.json(
-      buildFallback(goals, tasks, habits, overdueTasks, habitsAtRisk),
+      buildFallbackSimple(
+        activeGoals,
+        activeTasks,
+        overdueTaskTitles,
+        habitsAtRisk,
+      ),
     );
   } catch (error) {
     console.error("AI Error:", error);
     return res.json({
-      overall: "Unable to generate insights right now.",
-      suggestions: ["Review your overdue tasks"],
+      overall: "Unable to generate insights.",
+      suggestions: ["Review overdue tasks"],
       warnings: [],
-      focusArea: "Focus on your highest priority task today.",
+      focusArea: "Focus on top priority",
       motivation: "Keep tracking!",
     });
   }
