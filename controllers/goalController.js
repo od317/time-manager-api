@@ -54,6 +54,48 @@ const refreshGoalStatus = async (goalId) => {
   }
 };
 
+async function cascadeStatus(parentId, status) {
+  const now = new Date();
+
+  // Get all descendant IDs recursively
+  const allIds = [];
+  async function collectIds(id) {
+    const children = await prisma.goal.findMany({
+      where: { parentId: id },
+      select: { id: true },
+    });
+    for (const child of children) {
+      allIds.push(child.id);
+      await collectIds(child.id);
+    }
+  }
+  await collectIds(parentId);
+
+  if (allIds.length === 0) return;
+
+  // Update all descendants with the same status
+  const data = {
+    status,
+    lastActivityAt: now,
+    ...(status === "COMPLETED" ? { completedAt: now, progress: 100 } : {}),
+    ...(status === "FAILED" ? { failedAt: now } : {}),
+    ...(status === "ARCHIVED" ? { archivedAt: now } : {}),
+    ...(status === "ACTIVE"
+      ? {
+          completedAt: null,
+          failedAt: null,
+          archivedAt: null,
+          failureReason: null,
+        }
+      : {}),
+  };
+
+  await prisma.goal.updateMany({
+    where: { id: { in: allIds } },
+    data,
+  });
+}
+
 async function cascadeColor(parentId, color) {
   // Get direct children
   const children = await prisma.goal.findMany({
@@ -447,7 +489,6 @@ const updateGoal = async (req, res) => {
     // RULE: FAILED goals are locked (only archive allowed)
     // ==========================================================================
     if (existingGoal.status === "FAILED") {
-      const allowedFields = ["status"];
       const attemptedFields = Object.keys(req.body).filter(
         (k) => k !== "status",
       );
@@ -491,13 +532,9 @@ const updateGoal = async (req, res) => {
         });
       }
 
-      // Allow extending due date to move back to ACTIVE
       if (req.body.endDate) {
         const newEndDate = new Date(req.body.endDate);
-        if (newEndDate >= now) {
-          // User is extending the deadline - allow it
-          // Status will be changed to ACTIVE by refreshGoalStatus
-        } else {
+        if (newEndDate < now) {
           return res.status(400).json({
             message: "Cannot set end date in the past on an overdue goal.",
           });
@@ -596,12 +633,10 @@ const updateGoal = async (req, res) => {
       lastActivityAt: new Date(),
     };
 
-    // Remove undefined values
     Object.keys(updateData).forEach((key) => {
       if (updateData[key] === undefined) delete updateData[key];
     });
 
-    // Handle status changes
     if (status) {
       updateData.status = status;
 
@@ -609,7 +644,6 @@ const updateGoal = async (req, res) => {
         updateData.completedAt = new Date();
         updateData.failedAt = null;
         updateData.failureReason = null;
-        // If completing an overdue goal, set progress to 100%
         if (existingGoal.status === "OVERDUE") {
           updateData.progress = 100;
           updateData.currentValue =
@@ -633,11 +667,19 @@ const updateGoal = async (req, res) => {
       data: updateData,
     });
 
+    // Cascade color to descendants
     if (req.body.color && req.body.color !== existingGoal.color) {
       await cascadeColor(req.params.id, req.body.color);
     }
 
-    // Refresh status after update
+    // ✅ Cascade status to all descendants (top-down only)
+    if (
+      status &&
+      ["COMPLETED", "FAILED", "ARCHIVED", "ACTIVE"].includes(status)
+    ) {
+      await cascadeStatus(req.params.id, status);
+    }
+
     await refreshGoalStatus(req.params.id);
 
     const refreshedGoal = await prisma.goal.findUnique({
@@ -650,6 +692,50 @@ const updateGoal = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// ==========================================================================
+// CASCADE STATUS TO ALL DESCENDANTS
+// ==========================================================================
+async function cascadeStatus(parentId, status) {
+  const now = new Date();
+
+  // Collect all descendant IDs recursively
+  const allIds = [];
+  async function collectIds(id) {
+    const children = await prisma.goal.findMany({
+      where: { parentId: id },
+      select: { id: true },
+    });
+    for (const child of children) {
+      allIds.push(child.id);
+      await collectIds(child.id);
+    }
+  }
+  await collectIds(parentId);
+
+  if (allIds.length === 0) return;
+
+  const data = {
+    status,
+    lastActivityAt: now,
+    ...(status === "COMPLETED" ? { completedAt: now, progress: 100 } : {}),
+    ...(status === "FAILED" ? { failedAt: now } : {}),
+    ...(status === "ARCHIVED" ? { archivedAt: now } : {}),
+    ...(status === "ACTIVE"
+      ? {
+          completedAt: null,
+          failedAt: null,
+          archivedAt: null,
+          failureReason: null,
+        }
+      : {}),
+  };
+
+  await prisma.goal.updateMany({
+    where: { id: { in: allIds } },
+    data,
+  });
+}
 
 // @desc    Delete goal
 // @route   DELETE /api/goals/:id
