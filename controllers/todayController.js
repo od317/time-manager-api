@@ -15,7 +15,9 @@ async function fetchDescendants(parentIds, selectFields) {
     select: {
       ...selectFields,
       tasks: {
-        where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
+        where: {
+          status: { in: ["TODO", "IN_PROGRESS", "OVERDUE", "COMPLETED"] },
+        },
         select: {
           id: true,
           title: true,
@@ -58,7 +60,9 @@ async function fetchGoalTree(parentIds, selectFields) {
       ...selectFields,
       parentId: true,
       tasks: {
-        where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
+        where: {
+          status: { in: ["TODO", "IN_PROGRESS", "OVERDUE", "COMPLETED"] },
+        },
         select: {
           id: true,
           title: true,
@@ -158,7 +162,9 @@ const getTodayDashboard = async (req, res) => {
         ...goalSelectFields,
         parentId: true,
         tasks: {
-          where: { status: { in: ["TODO", "IN_PROGRESS", "OVERDUE"] } },
+          where: {
+            status: { in: ["TODO", "IN_PROGRESS", "OVERDUE", "COMPLETED"] },
+          },
           select: {
             id: true,
             title: true,
