@@ -16,7 +16,7 @@ const pomodoroRoutes = require("./routes/pomodoro");
 const seedRoutes = require("./routes/seed");
 const todayRoutes = require("./routes/today");
 const timerStateRoutes = require("./routes/timerState");
-
+const accountRoutes = require("./routes/account");
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -53,6 +53,7 @@ app.use("/api/create", createRoutes);
 app.use("/api/pomodoro", pomodoroRoutes);
 app.use("/api/seed", seedRoutes);
 app.use("/api/timer-state", timerStateRoutes);
+app.use("/api/account", accountRoutes);
 
 app.use("/api/today", todayRoutes);
 
