@@ -8,6 +8,7 @@ const {
   deleteGoal,
   reorderGoals,
   getGoalStats,
+  getGoalTime,
 } = require("../controllers/goalController");
 const auth = require("../middleware/auth");
 
@@ -20,5 +21,6 @@ router.put("/reorder", reorderGoals);
 router.put("/:id", updateGoal);
 router.delete("/:id", deleteGoal);
 router.get("/:id/stats", getGoalStats);
+router.get("/:id/time", getGoalTime);
 
 module.exports = router;

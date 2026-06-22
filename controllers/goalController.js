@@ -879,6 +879,60 @@ const getGoalStats = async (req, res) => {
   }
 };
 
+// @desc    Get time spent on a goal (including all sub-goals)
+// @route   GET /api/goals/:id/time
+
+const getGoalTime = async (req, res) => {
+  try {
+    const goal = await prisma.goal.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      select: { id: true },
+    });
+    if (!goal) return res.status(404).json({ message: "Goal not found" });
+
+    async function getAllDescendantIds(id, ids = []) {
+      const children = await prisma.goal.findMany({
+        where: { parentId: id },
+        select: { id: true },
+      });
+      for (const child of children) {
+        ids.push(child.id);
+        await getAllDescendantIds(child.id, ids);
+      }
+      return ids;
+    }
+
+    const allGoalIds = [goal.id, ...(await getAllDescendantIds(goal.id))];
+    const tasks = await prisma.task.findMany({
+      where: { goalId: { in: allGoalIds } },
+      select: { id: true },
+    });
+    const allTaskIds = tasks.map((t) => t.id);
+
+    const entries = await prisma.timeEntry.findMany({
+      where: {
+        status: "COMPLETED",
+        OR: [{ goalId: { in: allGoalIds } }, { taskId: { in: allTaskIds } }],
+      },
+      select: { id: true, duration: true },
+    });
+
+    const seenIds = new Set();
+    const totalTimeSpent = entries.reduce((sum, e) => {
+      if (!seenIds.has(e.id)) {
+        seenIds.add(e.id);
+        return sum + (e.duration || 0);
+      }
+      return sum;
+    }, 0);
+
+    res.json({ totalTimeSpent });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 module.exports = {
   getGoals,
   getGoal,
@@ -887,4 +941,5 @@ module.exports = {
   deleteGoal,
   reorderGoals,
   getGoalStats,
+  getGoalTime,
 };
